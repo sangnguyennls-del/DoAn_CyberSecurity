@@ -106,6 +106,11 @@ Nên công cụ tự đăng nhập thử, lấy token, gọi một endpoint cầ
 khi chưa đăng nhập; `/rest/user/whoami` **không** dùng được vì trả 200 cả hai trường hợp).
 Hỏng thì dừng ngay dưới 1 giây kèm thông báo rõ, ZAP bị bỏ qua còn Nikto vẫn chạy.
 
+Đo thật trên Juice Shop — `auth` tìm thêm 7 lỗ hổng mà `baseline` bỏ sót, gồm
+`Session ID in URL Rewrite` (Medium) và `Application Error Disclosure`. Hai mục
+`Authentication Request Identified` / `Session Management Response Identified` là bằng chứng
+ZAP đã thật sự nhận ra luồng đăng nhập.
+
 ## Đánh giá độ chính xác của AI
 
 ```powershell
