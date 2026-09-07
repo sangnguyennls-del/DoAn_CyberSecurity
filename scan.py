@@ -62,6 +62,9 @@ def cmd_scan(args) -> int:
         )
         out = Path(args.out)
         out.write_text(html, encoding="utf-8")
+        # Lưu để dashboard hiển thị lại được lần quét chạy từ CLI
+        db.save_summary(conn, scan_id, result["summary"], result["priority"],
+                        warnings + result["warnings"])
         db.finish_scan(conn, scan_id)
 
         print(f"\nBáo cáo: {out.resolve()}")

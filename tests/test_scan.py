@@ -222,3 +222,26 @@ def test_report_shows_warnings():
 def test_local_summary_counts_by_severity():
     s = _local_summary([mk("a", "/1", sev="High"), mk("b", "/2", sev="High"), mk("c", "/3", sev="Low")])
     assert "2 High" in s and "1 Low" in s
+
+
+# -------------------------------------------------- công thức đánh giá AI
+
+def test_confusion_matrix_counts_each_quadrant():
+    """Positive = "đây là false positive". Nhãn: is_true_positive 0 = FP thật."""
+    from eval.metrics import confusion
+    pairs = [
+        ({"is_true_positive": 0}, {"false_positive_risk": "Cao"}),          # TP
+        ({"is_true_positive": 1}, {"false_positive_risk": "Cao"}),          # FP - bác nhầm lỗ hổng thật
+        ({"is_true_positive": 0}, {"false_positive_risk": "Thấp"}),         # FN - bỏ sót nhiễu
+        ({"is_true_positive": 1}, {"false_positive_risk": "Trung bình"}),   # TN
+    ]
+    assert confusion(pairs) == (1, 1, 1, 1)
+
+
+def test_false_positive_prediction_only_on_high_risk():
+    from eval.metrics import predicts_false_positive
+    assert predicts_false_positive({"false_positive_risk": "Cao"})
+    assert predicts_false_positive({"false_positive_risk": " cao "})
+    assert not predicts_false_positive({"false_positive_risk": "Trung bình"})
+    assert not predicts_false_positive({"false_positive_risk": "Thấp"})
+    assert not predicts_false_positive({}), "thiếu trường thì không được coi là FP"

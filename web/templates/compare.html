@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}So sánh hai lần quét{% endblock %}
+
+{% block content %}
+<style>
+  .groups{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:24px}
+  @media(max-width:900px){.groups{grid-template-columns:1fr}}
+  .group{background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .group>h3{margin:0;padding:12px 16px;font-size:15px;color:#fff;
+            display:flex;justify-content:space-between;align-items:center}
+  .g-fixed>h3{background:#166534}
+  .g-new>h3{background:#991b1b}
+  .g-persisting>h3{background:#475569}
+  .group ul{list-style:none;margin:0;padding:0}
+  .group li{padding:10px 16px;border-bottom:1px solid var(--line);font-size:14px}
+  .group li:last-child{border-bottom:none}
+  .group .empty{padding:16px;color:var(--muted);font-style:italic;font-size:14px}
+  .sev{font-size:11px;font-weight:700;padding:1px 7px;border-radius:10px;
+       color:#fff;margin-right:6px;vertical-align:1px}
+  .n{background:rgba(255,255,255,.25);padding:2px 10px;border-radius:20px;font-size:13px}
+</style>
+
+<h1>So sánh hai lần quét</h1>
+<p class="sub">
+  Chạy quét → áp bản vá AI đề xuất → quét lại → so sánh ở đây.
+  Lỗ hổng nằm ở cột <strong>đã vá</strong> là bằng chứng bản vá có tác dụng thật.
+</p>
+
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+<form class="panel" method="get" action="/compare">
+  <div class="row">
+    <div>
+      <label for="a">A — trước khi vá</label>
+      <select id="a" name="a">
+        {% for s in scans %}
+        <option value="{{ s.id }}" {% if a == s.id %}selected{% endif %}>
+          #{{ s.id }} — {{ s.target }} ({{ s.n_findings }} lỗ hổng)
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="b">B — sau khi vá</label>
+      <select id="b" name="b">
+        {% for s in scans %}
+        <option value="{{ s.id }}" {% if b == s.id %}selected{% endif %}>
+          #{{ s.id }} — {{ s.target }} ({{ s.n_findings }} lỗ hổng)
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit">So sánh</button>
+  </div>
+</form>
+
+{% if diff %}
+<div class="groups">
+  {% for key, title in [('fixed','Đã vá'), ('new','Mới xuất hiện'), ('persisting','Còn tồn tại')] %}
+  <div class="group g-{{ key }}">
+    <h3>{{ title }} <span class="n">{{ diff[key]|length }}</span></h3>
+    {% if diff[key] %}
+    <ul>
+      {% for f in diff[key]|sort(attribute='severity') %}
+      <li>
+        <span class="sev {{ f.severity }}" style="background:var(--{{
+          {'High':'hi','Medium':'med','Low':'low','Info':'info'}[f.severity] }})">{{ f.severity }}</span>
+        {{ f.name }}
+        <span class="muted">&middot; {{ f.source }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">Không có.</p>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+<p class="sub" style="margin-top:22px">
+  So khớp theo <code>fingerprint</code> = <code>sha256(scanner | mã test)</code>, nên đổi
+  đường dẫn không tạo ra lỗ hổng "mới" giả.
+</p>
+{% endif %}
+{% endblock %}

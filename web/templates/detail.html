@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Lần quét #{{ scan.id }}{% endblock %}
+
+{% block content %}
+<h1>Lần quét #{{ scan.id }}</h1>
+<p class="sub">
+  Mục tiêu: <code>{{ scan.target }}</code> &middot;
+  Chế độ: <code>{{ scan.profile }}</code> &middot;
+  Bắt đầu: {{ scan.started_at }}
+  <span class="badge b-{{ scan.status }}">{{ scan.status }}</span>
+</p>
+
+{% if scan.status == 'running' %}
+  {# Poll 2 giây/lần. Khi xong, server trả header HX-Refresh -> tự tải lại trang. #}
+  <div hx-get="/scans/{{ scan.id }}/progress" hx-trigger="load, every 2s" hx-swap="innerHTML">
+    <div class="log">Đang khởi động...</div>
+  </div>
+  <p class="muted" style="margin-top:12px">
+    ZAP baseline thường mất 2–5 phút, chế độ full lâu hơn nhiều. Có thể rời trang rồi quay lại.
+  </p>
+
+{% elif scan.status == 'error' %}
+  <div class="err"><strong>Lần quét thất bại:</strong> {{ scan.error }}</div>
+
+{% else %}
+  <div class="actions">
+    <a href="/scans/{{ scan.id }}/report.html" target="_blank"><button class="ghost">Mở báo cáo HTML</button></a>
+    <a href="/compare?a={{ scan.id }}"><button class="ghost">So sánh với lần quét khác</button></a>
+    <span class="muted">Báo cáo là file tự chứa, tải về mở offline được.</span>
+  </div>
+  {% include "_findings.html" %}
+{% endif %}
+{% endblock %}

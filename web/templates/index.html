@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Quét mới{% endblock %}
+
+{% block content %}
+<h1>Quét lỗ hổng bảo mật Web</h1>
+<p class="sub">
+  Nikto + OWASP ZAP quét mục tiêu, Claude phân tích kết quả và đề xuất bản vá.
+  Chỉ quét được <code>localhost</code> và mạng nội bộ.
+</p>
+
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+<form class="panel" method="post" action="/scans">
+  <div class="row">
+    <div style="flex:1;min-width:280px">
+      <label for="target">URL mục tiêu</label>
+      <input type="url" id="target" name="target" required
+             value="http://localhost:3000" placeholder="http://localhost:3000">
+    </div>
+    <div>
+      <label for="profile">Chế độ quét</label>
+      <select id="profile" name="profile">
+        <option value="baseline">baseline — nhanh, chỉ passive</option>
+        <option value="full">full — có active scan, lâu hơn nhiều</option>
+      </select>
+    </div>
+    <label class="check"><input type="checkbox" name="use_ai" value="1" checked> Phân tích bằng AI</label>
+    <button type="submit">Bắt đầu quét</button>
+  </div>
+</form>
+
+<h2 style="font-size:18px;margin-bottom:12px">Lịch sử quét</h2>
+
+{% if scans %}
+<table>
+  <tr>
+    <th>#</th><th>Mục tiêu</th><th>Chế độ</th><th>Trạng thái</th>
+    <th>Lỗ hổng</th><th>Bắt đầu</th><th></th>
+  </tr>
+  {% for s in scans %}
+  <tr>
+    <td><strong>{{ s.id }}</strong></td>
+    <td>{{ s.target }}</td>
+    <td class="muted">{{ s.profile }}</td>
+    <td><span class="badge b-{{ s.status }}">{{ s.status }}</span></td>
+    <td>{{ s.n_findings }}</td>
+    <td class="muted">{{ s.started_at }}</td>
+    <td><a href="/scans/{{ s.id }}">Xem &rarr;</a></td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="muted">Chưa có lần quét nào. Dựng target lab trước:
+  <code>docker run --rm -d -p 3000:3000 --name juiceshop bkimminich/juice-shop</code>
+</p>
+{% endif %}
+{% endblock %}

@@ -22,7 +22,10 @@ CREATE TABLE IF NOT EXISTS scans (
     started_at   TEXT NOT NULL,
     finished_at  TEXT,
     status       TEXT NOT NULL DEFAULT 'running',   -- running | done | error
-    error        TEXT
+    error        TEXT,
+    summary      TEXT,          -- tóm tắt do AI viết cho lần quét này
+    priority_json TEXT,         -- thứ tự nên xử lý, danh sách fingerprint
+    warnings_json TEXT          -- cảnh báo của scanner (scanner chết, parse lỗi...)
 );
 
 CREATE TABLE IF NOT EXISTS findings (
@@ -66,11 +69,23 @@ def _now() -> str:
 
 
 def connect(path: str = DB_PATH) -> sqlite3.Connection:
-    conn = sqlite3.connect(path)
+    # timeout: hai lần quét chạy song song có thể tranh nhau ghi
+    conn = sqlite3.connect(path, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """CREATE TABLE IF NOT EXISTS không thêm cột vào bảng đã tồn tại.
+    Vòng này để file doan.db tạo từ phiên bản cũ không bị vỡ."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(scans)")}
+    for col in ("summary", "priority_json", "warnings_json"):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE scans ADD COLUMN {col} TEXT")
+    conn.commit()
 
 
 # ---------------------------------------------------------------- scans
@@ -92,8 +107,36 @@ def finish_scan(conn: sqlite3.Connection, scan_id: int, error: str | None = None
     conn.commit()
 
 
+def get_scan(conn: sqlite3.Connection, scan_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM scans WHERE id = ?", (scan_id,)).fetchone()
+
+
 def list_scans(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    return conn.execute("SELECT * FROM scans ORDER BY id DESC").fetchall()
+    """Kèm luôn số lỗ hổng để trang danh sách không phải query từng dòng."""
+    return conn.execute("""
+        SELECT s.*, (SELECT COUNT(*) FROM findings f WHERE f.scan_id = s.id) AS n_findings
+        FROM scans s ORDER BY s.id DESC
+    """).fetchall()
+
+
+def save_summary(conn: sqlite3.Connection, scan_id: int, summary: str,
+                 priority: list[str], warnings: list[str]) -> None:
+    conn.execute(
+        "UPDATE scans SET summary = ?, priority_json = ?, warnings_json = ? WHERE id = ?",
+        (summary, json.dumps(priority, ensure_ascii=False),
+         json.dumps(warnings, ensure_ascii=False), scan_id),
+    )
+    conn.commit()
+
+
+def get_summary(conn: sqlite3.Connection, scan_id: int) -> tuple[str, list[str], list[str]]:
+    """Trả về (tóm tắt, thứ tự ưu tiên, cảnh báo) đã lưu của một lần quét."""
+    r = conn.execute(
+        "SELECT summary, priority_json, warnings_json FROM scans WHERE id = ?", (scan_id,)
+    ).fetchone()
+    if not r:
+        return "", [], []
+    return (r["summary"] or ""), json.loads(r["priority_json"] or "[]"), json.loads(r["warnings_json"] or "[]")
 
 
 # ------------------------------------------------------------- findings
