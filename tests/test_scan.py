@@ -245,3 +245,55 @@ def test_false_positive_prediction_only_on_high_risk():
     assert not predicts_false_positive({"false_positive_risk": "Trung bình"})
     assert not predicts_false_positive({"false_positive_risk": "Thấp"})
     assert not predicts_false_positive({}), "thiếu trường thì không được coi là FP"
+
+
+# ------------------------------------------------- quét có đăng nhập (auth)
+
+def test_auth_profile_requires_credentials(monkeypatch, tmp_path):
+    """Thiếu tài khoản phải báo lỗi rõ ràng, không sinh plan rỗng."""
+    monkeypatch.delenv("ZAP_AUTH_USER", raising=False)
+    monkeypatch.delenv("ZAP_AUTH_PASS", raising=False)
+    with pytest.raises(zap.MissingCredentials):
+        zap.docker_args("http://localhost:3000", str(tmp_path), "auth")
+
+
+def test_auth_plan_substitutes_every_placeholder(monkeypatch, tmp_path):
+    monkeypatch.setenv("ZAP_AUTH_USER", "hocvien@lab.local")
+    monkeypatch.setenv("ZAP_AUTH_PASS", "matkhau-lab")
+    args = zap.docker_args("http://host.docker.internal:3000/", str(tmp_path), "auth")
+
+    assert "-autorun" in args
+    plan = (tmp_path / zap.PLAN_FILE).read_text(encoding="utf-8")
+    config = [l for l in plan.splitlines() if not l.lstrip().startswith("#")]
+    assert not any("{{" in l for l in config), "còn placeholder chưa thay -> ZAP sẽ chạy sai"
+    assert "hocvien@lab.local" in plan and "matkhau-lab" in plan
+    assert "http://host.docker.internal:3000/rest/user/login" in plan
+
+
+def test_missing_credentials_does_not_kill_nikto(monkeypatch, tmp_path):
+    """Bug đã sửa: docker_args ném exception thì cả lần quét chết, kể cả Nikto."""
+    monkeypatch.delenv("ZAP_AUTH_USER", raising=False)
+    monkeypatch.delenv("ZAP_AUTH_PASS", raising=False)
+    from scanners import runner
+
+    # Không thực sự chạy docker: chỉ cần chắc lỗi biến thành warning, không raise
+    monkeypatch.setattr(runner, "_run_one", lambda *a, **k: ([], None))
+    findings, warns = runner.run_scan("http://localhost:3000", profile="auth")
+    assert any("ZAP_AUTH_USER" in w for w in warns)
+    assert findings == []
+
+
+def test_zap_variants_of_same_plugin_stay_separate():
+    """Hồi quy cho bug đo được thật: ZAP plugin 10055 phát ra nhiều biến thể CSP
+    khác hẳn nhau. Nếu gom chung fingerprint thì diff giữa hai lần quét báo
+    "không đổi" trong khi vấn đề đã thay đổi - làm hỏng bằng chứng vá lỗi."""
+    def alert(ref, name):
+        return {"pluginid": "10055", "alertRef": ref, "name": name, "riskcode": "2",
+                "instances": [{"uri": "http://localhost:8080/"}], "count": "1"}
+
+    findings = zap.parse({"site": [{"@name": "http://localhost:8080", "alerts": [
+        alert("10055-1", "CSP: Failure to Define Directive with No Fallback"),
+        alert("10055-2", "CSP: script-src unsafe-inline"),
+    ]}]})
+    assert len({f.fingerprint for f in findings}) == 2, "hai biến thể phải khác fingerprint"
+    assert len(dedupe(findings)) == 2, "dedupe không được gộp hai biến thể khác nhau"

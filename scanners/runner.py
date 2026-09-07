@@ -67,10 +67,22 @@ def run_scan(
     outdir = Path(tempfile.mkdtemp(prefix="doan_scan_"))
 
     jobs = []
+    warnings: list[str] = []
     if use_nikto:
         jobs.append(("Nikto", nikto.docker_args(target, str(outdir)), nikto.OUTFILE, nikto.parse))
     if use_zap:
-        jobs.append(("ZAP", zap.docker_args(target, str(outdir), profile), zap.OUTFILE, zap.parse))
+        try:
+            args = zap.docker_args(target, str(outdir), profile)
+            jobs.append(("ZAP", args, zap.OUTFILE, zap.parse))
+        except zap.MissingCredentials as e:
+            # Thiếu tài khoản cho profile auth không được phép giết cả lần quét:
+            # Nikto vẫn chạy được, và người dùng cần thấy lý do trong báo cáo.
+            warnings.append(f"ZAP: {e}")
+            say(f"  [!] ZAP bị bỏ qua: {e}")
+
+    if not jobs:
+        say("Không còn scanner nào chạy được.")
+        return [], warnings
 
     say(f"Chạy {len(jobs)} scanner song song trên {target} (profile={profile})...")
     try:
@@ -82,7 +94,6 @@ def run_scan(
         shutil.rmtree(outdir, ignore_errors=True)
 
     findings: list[Finding] = []
-    warnings: list[str] = []
     for (name, *_), (found, warn) in zip(jobs, results):
         if warn:
             warnings.append(warn)

@@ -77,6 +77,22 @@ python scan.py --compare 1 2          # trước/sau khi vá
 Dashboard và CLI dùng chung một bộ hàm và chung một database — quét bằng CLI vẫn xem được
 trên dashboard và ngược lại.
 
+## Quét có đăng nhập
+
+`baseline` và `full` chỉ thấy phần công khai. Profile `auth` để ZAP đăng nhập trước rồi mới
+quét, nhờ đó chạm được phần sau màn login (giỏ hàng, thông tin cá nhân, API của user).
+
+```powershell
+# Tạo một tài khoản trên chính target lab, rồi điền vào .env:
+#   ZAP_AUTH_USER=... / ZAP_AUTH_PASS=...
+python scan.py http://localhost:3000 --profile auth
+```
+
+Dùng ZAP Automation Framework (`scanners/zap_auth.yaml`), mặc định cấu hình cho Juice Shop;
+target khác thì đè bằng `ZAP_LOGIN_URL` / `ZAP_LOGIN_BODY`. Tài khoản **không hardcode trong
+repo** — kể cả tài khoản lab, vì thói quen commit mật khẩu rất dễ mang sang project thật.
+Thiếu tài khoản thì ZAP bị bỏ qua kèm cảnh báo, Nikto vẫn chạy.
+
 ## Đánh giá độ chính xác của AI
 
 ```powershell
@@ -94,7 +110,7 @@ lời AI là chấm bài bằng đáp án của người làm bài, số liệu 
 pytest -q
 ```
 
-32 test chạy hoàn toàn offline — không cần Docker, không gọi API, không cần mạng.
+36 test chạy hoàn toàn offline — không cần Docker, không gọi API, không cần mạng.
 
 ## Kiến trúc
 
@@ -120,7 +136,7 @@ api/ (dashboard)─┴─> cùng một bộ hàm bên dưới, cùng một datab
 
 ### `fingerprint` — điểm thiết kế cốt lõi
 
-`sha256(source | mã_plugin)`, cắt còn 16 ký tự. Một trường làm bốn việc:
+`sha256(source | mã_biến_thể)`, cắt còn 16 ký tự. Một trường làm bốn việc:
 
 1. gom trùng trong một lần quét
 2. so sánh giữa hai lần quét — diff chỉ là phép toán tập hợp
@@ -134,6 +150,12 @@ vượt `max_tokens` khi gửi lên API. Với khoá hiện tại: 163 phát hi�
 
 Số URL bị ảnh hưởng không mất đi: xem `count` (số thật) và `urls` (5 mẫu). Cách này cũng làm
 diff giữa hai lần quét bền hơn — quét lại target không đổi cho ra diff rỗng hoàn toàn.
+
+**Khoá dùng `alertRef` chứ không phải `pluginid`.** Một plugin ZAP phát ra nhiều biến thể
+khác hẳn nhau: `CSP: Failure to Define Directive with No Fallback` và
+`CSP: script-src unsafe-inline` đều là pluginid `10055` nhưng alertRef khác nhau. Nếu gom
+theo pluginid, trang so sánh sẽ báo "không có gì thay đổi" trong khi vấn đề đã đổi hẳn —
+tức là **bằng chứng "đã vá" của đồ án trở thành sai**. Có test hồi quy canh việc này.
 
 ## Ghi chú kỹ thuật (đã xử lý sẵn, đừng "sửa lại")
 
@@ -152,8 +174,8 @@ diff giữa hai lần quét bền hơn — quét lại target không đổi cho 
 
 ## Giới hạn đã biết
 
-- ZAP `baseline` chỉ quét passive → không vào được phần sau màn login của Juice Shop.
-  Profile `authenticated` chưa làm.
+- ZAP `baseline` chỉ quét passive. Dùng `--profile auth` để vào được phần sau màn login,
+  `--profile full` để có active scan.
 - Nikto không xếp hạng mức độ nghiêm trọng, mọi phát hiện đều vào `Info` rồi để AI đánh giá lại.
 - Tiến trình quét giữ trong bộ nhớ → khởi động lại server thì mất log, nhưng kết quả quét
   không mất vì đã nằm trong SQLite.

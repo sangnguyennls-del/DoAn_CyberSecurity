@@ -117,8 +117,9 @@ def main() -> int:
         epilog="Chỉ quét hệ thống bạn sở hữu hoặc có văn bản cho phép.",
     )
     p.add_argument("url", nargs="?", help="URL mục tiêu, ví dụ http://localhost:3000")
-    p.add_argument("--profile", choices=["baseline", "full"], default="baseline",
-                   help="baseline = nhanh, chỉ passive. full = có active scan, lâu hơn nhiều.")
+    p.add_argument("--profile", choices=["baseline", "full", "auth"], default="baseline",
+                   help="baseline = nhanh, chỉ passive. full = có active scan, lâu hơn nhiều. "
+                        "auth = đăng nhập trước khi quét (cần ZAP_AUTH_USER/ZAP_AUTH_PASS trong .env).")
     p.add_argument("--no-ai", action="store_true", help="Chỉ chạy scanner, không gọi API")
     p.add_argument("--no-nikto", action="store_true")
     p.add_argument("--no-zap", action="store_true")

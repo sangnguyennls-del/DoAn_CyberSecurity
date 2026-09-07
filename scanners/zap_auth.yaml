@@ -1,0 +1,57 @@
+# ZAP Automation Framework — quét CÓ ĐĂNG NHẬP.
+#
+# zap-baseline.py không đăng nhập được, nên chỉ thấy phần công khai của ứng dụng.
+# File này dùng Automation Framework để ZAP tự đăng nhập rồi mới quét, nhờ đó chạm
+# được vào phần sau màn login (giỏ hàng, thông tin cá nhân, API của user).
+#
+# Các chỗ {{...}} được scanners/zap.py thay bằng giá trị thật trước khi chạy.
+# Mặc định cấu hình cho OWASP Juice Shop; target khác thì đổi login_url/body/selector.
+
+env:
+  contexts:
+    - name: target
+      urls: [ "{{TARGET}}" ]
+      includePaths: [ "{{TARGET}}.*" ]
+      excludePaths:
+        # Đừng để scanner tự đăng xuất mình hoặc đổi mật khẩu tài khoản đang dùng
+        - ".*/logout.*"
+        - ".*/change-password.*"
+      authentication:
+        method: json
+        parameters:
+          loginPageUrl: "{{TARGET}}/#/login"
+          loginRequestUrl: "{{LOGIN_URL}}"
+          loginRequestBody: '{{LOGIN_BODY}}'
+        verification:
+          method: response
+          loggedInRegex: "\\Qauthentication\\E"
+          loggedOutRegex: "\\QInvalid email or password\\E"
+      sessionManagement:
+        # Juice Shop trả JWT trong JSON rồi gửi lại qua header Authorization
+        method: headers
+        parameters:
+          Authorization: "Bearer {%json:authentication.token%}"
+      users:
+        - name: lab-user
+          credentials:
+            username: "{{USERNAME}}"
+            password: "{{PASSWORD}}"
+  parameters:
+    failOnError: false
+    failOnWarning: false
+    progressToStdout: true
+
+jobs:
+  - type: spider
+    parameters:
+      context: target
+      user: lab-user
+      maxDuration: 3
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 5
+  - type: report
+    parameters:
+      template: traditional-json
+      reportDir: /zap/wrk
+      reportFile: zap.json
