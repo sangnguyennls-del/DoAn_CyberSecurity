@@ -260,6 +260,7 @@ def test_auth_profile_requires_credentials(monkeypatch, tmp_path):
 def test_auth_plan_substitutes_every_placeholder(monkeypatch, tmp_path):
     monkeypatch.setenv("ZAP_AUTH_USER", "hocvien@lab.local")
     monkeypatch.setenv("ZAP_AUTH_PASS", "matkhau-lab")
+    monkeypatch.setattr(zap, "_verify_login", lambda *a, **k: None)  # test offline
     args = zap.docker_args("http://host.docker.internal:3000/", str(tmp_path), "auth")
 
     assert "-autorun" in args
@@ -268,6 +269,20 @@ def test_auth_plan_substitutes_every_placeholder(monkeypatch, tmp_path):
     assert not any("{{" in l for l in config), "còn placeholder chưa thay -> ZAP sẽ chạy sai"
     assert "hocvien@lab.local" in plan and "matkhau-lab" in plan
     assert "http://host.docker.internal:3000/rest/user/login" in plan
+
+
+def test_login_check_failure_stops_the_scan(monkeypatch, tmp_path):
+    """Đăng nhập hỏng PHẢI dừng lại. Nếu chạy tiếp, ZAP quét ẩn danh và cho ra
+    một báo cáo trông y hệt lần quét có đăng nhập - sai mà không ai biết."""
+    monkeypatch.setenv("ZAP_AUTH_USER", "sai@lab.local")
+    monkeypatch.setenv("ZAP_AUTH_PASS", "sai")
+
+    def boom(*a, **k):
+        raise zap.AuthSetupFailed("Đăng nhập thất bại (HTTP 401)")
+    monkeypatch.setattr(zap, "_verify_login", boom)
+
+    with pytest.raises(zap.AuthSetupFailed):
+        zap.docker_args("http://localhost:3000", str(tmp_path), "auth")
 
 
 def test_missing_credentials_does_not_kill_nikto(monkeypatch, tmp_path):
@@ -380,3 +395,24 @@ def test_export_preserves_existing_labels(monkeypatch, tmp_path):
     kept = rows[findings[0].fingerprint]
     assert kept["is_true_positive"] == "1" and kept["patch_ok"] == "1"
     assert kept["note"] == "ghi chú" and kept["labeled_by"] == "an"
+
+
+def test_report_write_failure_does_not_fail_the_scan(tmp_path):
+    """Bug đã sửa: ghi file báo cáo hỏng thì cả lần quét bị đánh dấu error, dù
+    findings đã lưu đủ trong DB. Mất 10 phút quét chỉ vì sai đường dẫn -o."""
+    from scan import save_report_file
+
+    # Đường dẫn không ghi được (thư mục lại là một file đang tồn tại)
+    blocker = tmp_path / "chan"
+    blocker.write_text("x", encoding="utf-8")
+    out, warn = save_report_file("<html></html>", str(blocker / "bao-cao.html"))
+    assert out is None and warn is not None
+    assert "Kết quả vẫn đã lưu" in warn
+
+
+def test_report_write_creates_missing_parent_dirs(tmp_path):
+    from scan import save_report_file
+
+    out, warn = save_report_file("<html>xin chào</html>", str(tmp_path / "a" / "b" / "r.html"))
+    assert warn is None
+    assert out.read_text(encoding="utf-8") == "<html>xin chào</html>"

@@ -23,6 +23,23 @@ from core.config import MODEL, TargetNotAllowed, check_target
 from scanners.runner import run_scan
 
 
+def save_report_file(html: str, path: str) -> tuple[Path | None, str | None]:
+    """Ghi báo cáo ra file. Trả về (đường dẫn, cảnh báo).
+
+    Ghi file là bước ÍT quan trọng nhất của cả lần quét - kết quả thật nằm trong
+    SQLite và xem lại được trên dashboard. Nên lỗi ở đây chỉ là cảnh báo, tuyệt đối
+    không được đánh hỏng một lần quét đã chạy mất 10 phút.
+    """
+    out = Path(path)
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(html, encoding="utf-8")
+        return out, None
+    except OSError as e:
+        return None, (f"Không ghi được báo cáo ra {path!r} ({type(e).__name__}: {e}). "
+                      f"Kết quả vẫn đã lưu, xem bằng dashboard hoặc python scan.py --list.")
+
+
 def cmd_scan(args) -> int:
     try:
         target = check_target(args.url, allow_external=args.allow_external)

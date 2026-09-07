@@ -37,19 +37,24 @@ env:
             username: "{{USERNAME}}"
             password: "{{PASSWORD}}"
   parameters:
-    failOnError: false
+    # failOnError PHẢI là true: nếu bước kiểm tra đăng nhập bên dưới hỏng mà vẫn
+    # chạy tiếp, ZAP sẽ quét ẩn danh và cho ra một báo cáo trông y hệt bình thường.
+    # Thà hỏng to còn hơn ra bằng chứng sai.
+    failOnError: true
     failOnWarning: false
     progressToStdout: true
 
 jobs:
   # Kiểm tra đăng nhập có thành công không TRƯỚC khi tốn thời gian crawl.
-  # Thất bại ở đây thì mọi kết quả sau đó chỉ là quét ẩn danh - tệ hơn cả báo lỗi,
-  # vì nó trông y hệt một lần quét bình thường.
+  # Endpoint phải là loại trả 401 khi CHƯA đăng nhập. Đo thật trên Juice Shop:
+  #   /rest/user/whoami  -> 200 kể cả khi chưa đăng nhập  => KHÔNG dùng được
+  #   /api/Cards         -> 401 chưa đăng nhập, 200 khi có -> dùng cái này
+  # Target khác thì đè bằng ZAP_AUTH_CHECK_PATH.
   - type: requestor
     parameters:
       user: lab-user
     requests:
-      - url: "{{TARGET}}/rest/user/whoami"
+      - url: "{{TARGET}}{{CHECK_PATH}}"
         method: GET
         responseCode: 200
 

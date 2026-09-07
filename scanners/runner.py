@@ -74,7 +74,7 @@ def run_scan(
         try:
             args = zap.docker_args(target, str(outdir), profile)
             jobs.append(("ZAP", args, zap.OUTFILE, zap.parse))
-        except zap.MissingCredentials as e:
+        except zap.AuthSetupFailed as e:
             # Thiếu tài khoản cho profile auth không được phép giết cả lần quét:
             # Nikto vẫn chạy được, và người dùng cần thấy lý do trong báo cáo.
             warnings.append(f"ZAP: {e}")

@@ -6,13 +6,17 @@ Tức là "tìm thấy lỗ hổng" = exit code khác 0. Tuyệt đối không d
 
 from __future__ import annotations
 
+import json
 import os
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from core.models import ZAP_RISKCODE, Finding, clean_html, fingerprint
 
 IMAGE = "ghcr.io/zaproxy/zaproxy:stable"
 OUTFILE = "zap.json"
+DOCKER_ALIAS = "host.docker.internal"
 PLAN_TEMPLATE = Path(__file__).parent / "zap_auth.yaml"
 PLAN_FILE = "af-plan.yaml"
 
@@ -23,11 +27,70 @@ SCRIPTS = {
 
 # Mặc định cấu hình cho Juice Shop; target khác thì đè bằng biến môi trường
 DEFAULT_LOGIN_PATH = "/rest/user/login"
+# Phải là endpoint trả 401 khi chưa đăng nhập, nếu không thì bước kiểm tra vô nghĩa
+DEFAULT_CHECK_PATH = "/api/Cards"
 DEFAULT_LOGIN_BODY = '{"email":"{%username%}","password":"{%password%}"}'
 
 
-class MissingCredentials(Exception):
-    """Profile auth cần tài khoản nhưng .env chưa khai báo."""
+class AuthSetupFailed(Exception):
+    """Không thiết lập được quét-có-đăng-nhập: thiếu tài khoản, hoặc đăng nhập hỏng."""
+
+
+# Giữ tên cũ để code/test cũ không gãy
+MissingCredentials = AuthSetupFailed
+
+
+def _verify_login(container_url: str, login_url: str, body: str,
+                  user: str, password: str, check_path: str) -> None:
+    """Đăng nhập thử TRƯỚC khi khởi động ZAP. Hỏng thì raise.
+
+    Vì sao không để ZAP tự kiểm: đã thử job `requestor` với `responseCode: 200` và
+    `failOnError: true`. Đo thật với mật khẩu sai -> ZAP coi lệch response code là
+    WARNING chứ không phải error, nên vẫn crawl hết và vẫn sinh zap.json. Kết quả
+    là một lần quét ẩn danh trông y hệt lần quét có đăng nhập.
+
+    Đó là kiểu hỏng tệ nhất cho đồ án: không báo lỗi, chỉ âm thầm sai. Nên phần
+    kiểm tra phải nằm ở đây, nơi mình quyết định được điều gì xảy ra tiếp theo.
+    """
+    # Container thấy host.docker.internal, còn tiến trình này chạy trên host
+    host = container_url.replace(DOCKER_ALIAS, "localhost")
+    login = login_url.replace(DOCKER_ALIAS, "localhost")
+    payload = body.replace("{%username%}", user).replace("{%password%}", password)
+
+    def _get(url, headers=None):
+        req = urllib.request.Request(url, headers=headers or {})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.status, r.read()
+
+    try:
+        req = urllib.request.Request(login, data=payload.encode("utf-8"),
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            token = json.loads(r.read())["authentication"]["token"]
+    except urllib.error.HTTPError as e:
+        raise AuthSetupFailed(
+            f"Đăng nhập thất bại (HTTP {e.code}) tại {login}. "
+            f"Kiểm tra lại ZAP_AUTH_USER/ZAP_AUTH_PASS trong .env."
+        ) from e
+    except (urllib.error.URLError, KeyError, ValueError, TimeoutError) as e:
+        raise AuthSetupFailed(
+            f"Không lấy được token từ {login} ({type(e).__name__}: {e}). "
+            f"Nếu target không phải Juice Shop, đặt ZAP_LOGIN_URL/ZAP_LOGIN_BODY."
+        ) from e
+
+    check = host.rstrip("/") + check_path
+    try:
+        status, _ = _get(check, {"Authorization": f"Bearer {token}"})
+    except urllib.error.HTTPError as e:
+        status = e.code
+    except (urllib.error.URLError, TimeoutError) as e:
+        raise AuthSetupFailed(f"Không gọi được {check} để kiểm tra đăng nhập ({e}).") from e
+
+    if status != 200:
+        raise AuthSetupFailed(
+            f"Có token nhưng {check} vẫn trả HTTP {status} -> ZAP sẽ quét ẩn danh. "
+            f"Đặt ZAP_AUTH_CHECK_PATH thành một endpoint trả 401 khi chưa đăng nhập."
+        )
 
 
 def _write_auth_plan(container_url: str, host_outdir: str) -> None:
@@ -39,7 +102,7 @@ def _write_auth_plan(container_url: str, host_outdir: str) -> None:
     user = os.getenv("ZAP_AUTH_USER", "")
     password = os.getenv("ZAP_AUTH_PASS", "")
     if not user or not password:
-        raise MissingCredentials(
+        raise AuthSetupFailed(
             "Profile auth cần ZAP_AUTH_USER và ZAP_AUTH_PASS trong .env. "
             "Tạo một tài khoản trên chính target lab của bạn rồi điền vào."
         )
@@ -47,10 +110,14 @@ def _write_auth_plan(container_url: str, host_outdir: str) -> None:
     login_url = os.getenv("ZAP_LOGIN_URL", container_url.rstrip("/") + DEFAULT_LOGIN_PATH)
     body = os.getenv("ZAP_LOGIN_BODY", DEFAULT_LOGIN_BODY)
     if "'" in body:
-        raise MissingCredentials("ZAP_LOGIN_BODY không được chứa dấu nháy đơn (vỡ YAML).")
+        raise AuthSetupFailed("ZAP_LOGIN_BODY không được chứa dấu nháy đơn (vỡ YAML).")
+
+    check_path = os.getenv("ZAP_AUTH_CHECK_PATH", DEFAULT_CHECK_PATH)
+    _verify_login(container_url, login_url, body, user, password, check_path)
 
     plan = PLAN_TEMPLATE.read_text(encoding="utf-8")
     for key, val in (("{{TARGET}}", container_url.rstrip("/")),
+                     ("{{CHECK_PATH}}", check_path),
                      ("{{LOGIN_URL}}", login_url),
                      ("{{LOGIN_BODY}}", body),
                      ("{{USERNAME}}", user),
