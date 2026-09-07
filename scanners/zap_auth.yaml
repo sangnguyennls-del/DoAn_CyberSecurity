@@ -42,11 +42,32 @@ env:
     progressToStdout: true
 
 jobs:
+  # Kiểm tra đăng nhập có thành công không TRƯỚC khi tốn thời gian crawl.
+  # Thất bại ở đây thì mọi kết quả sau đó chỉ là quét ẩn danh - tệ hơn cả báo lỗi,
+  # vì nó trông y hệt một lần quét bình thường.
+  - type: requestor
+    parameters:
+      user: lab-user
+    requests:
+      - url: "{{TARGET}}/rest/user/whoami"
+        method: GET
+        responseCode: 200
+
   - type: spider
     parameters:
       context: target
       user: lab-user
       maxDuration: 3
+
+  # Juice Shop là SPA Angular: spider truyền thống chỉ thấy index.html.
+  # spiderAjax chạy trình duyệt thật nên mới vào được các route phía sau.
+  - type: spiderAjax
+    parameters:
+      context: target
+      user: lab-user
+      browserId: firefox-headless
+      maxDuration: 5
+
   - type: passiveScan-wait
     parameters:
       maxDuration: 5

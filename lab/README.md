@@ -48,8 +48,15 @@ Những phát hiện nằm ở cột **đã vá** chính là bằng chứng bả
 ```powershell
 pip install flask
 python lab/vulnapp/app.py                     # http://127.0.0.1:5000
-python scan.py http://localhost:5000
+python scan.py http://localhost:5000 --profile full
 ```
+
+> **Phải dùng `--profile full`.** `baseline` chỉ quét passive — nó đọc response chứ không
+> thử tấn công, nên chỉ tìm ra lỗ hổng 4 (thiếu header). Đo thật trên vulnapp: baseline
+> ra 12 lỗ hổng nhưng **không có SQLi lẫn XSS**. Muốn ZAP tìm được lỗ hổng 1–3 thì phải
+> có active scan, tức `--profile full`, vì chỉ chế độ đó mới fuzz tham số `q` và `name`.
+>
+> Nếu quên, phần demo "AI vá code" sẽ không có gì để vá.
 
 Bốn lỗ hổng cố ý, đánh dấu sẵn trong `vulnapp/app.py` bằng comment `LỖ HỔNG N`:
 
