@@ -4,6 +4,9 @@ __pycache__/
 venv/
 .env
 *.db
-report*.html
-out/
 .pytest_cache/
+out/
+
+# Bao cao sinh ra o thu muc goc. Neo bang "/" de KHONG nuot
+# web/templates/report.html - thieu file do la clone ve chay khong duoc.
+/report*.html

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Báo cáo quét lỗ hổng - {{ target }}</title>
+<style>
+  :root{--hi:#b91c1c;--med:#c2410c;--low:#a16207;--info:#475569;--line:#e2e8f0;--muted:#64748b}
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.6 system-ui,"Segoe UI",sans-serif;color:#0f172a;background:#f8fafc}
+  .wrap{max-width:1100px;margin:0 auto;padding:32px 20px 80px}
+  header{border-bottom:3px solid #0f172a;padding-bottom:16px;margin-bottom:24px}
+  h1{margin:0 0 6px;font-size:26px}
+  .meta{color:var(--muted);font-size:14px}
+  .meta code{background:#e2e8f0;padding:1px 6px;border-radius:4px}
+  footer{margin-top:40px;padding-top:20px;border-top:1px solid var(--line);
+         color:var(--muted);font-size:13px}
+</style>
+</head>
+<body><div class="wrap">
+
+<header>
+  <h1>Báo cáo quét lỗ hổng bảo mật Web</h1>
+  <div class="meta">
+    Mục tiêu: <code>{{ target }}</code> &middot;
+    Profile: <code>{{ profile }}</code> &middot;
+    Thời điểm: {{ generated_at }} &middot;
+    Scanner: Nikto + OWASP ZAP &middot; Phân tích: {{ model }}
+  </div>
+</header>
+
+{% include "_findings.html" %}
+
+<footer>
+  Báo cáo sinh tự động bởi công cụ đồ án môn Nhập môn đảm bảo an ninh thông tin.
+  Mọi phân tích và bản vá ở cột bên phải do mô hình <strong>{{ model }}</strong> sinh ra
+  và <strong>chưa được kiểm chứng tự động</strong> &mdash; phải đối chiếu với bằng chứng thô
+  ở cột bên trái và thử nghiệm trên môi trường lab trước khi áp dụng.
+  Chỉ quét các hệ thống bạn sở hữu hoặc có văn bản cho phép.
+</footer>
+
+</div></body></html>
