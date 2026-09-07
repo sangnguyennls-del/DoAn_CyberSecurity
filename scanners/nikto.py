@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from core.models import Finding, clean_html, fingerprint
 
-IMAGE = "sullo/nikto"
+IMAGE = "ghcr.io/sullo/nikto:latest"  # image chính thức nằm trên ghcr, KHÔNG phải Docker Hub
 OUTFILE = "nikto.json"
 
 

@@ -10,6 +10,12 @@ import ipaddress
 import os
 from urllib.parse import urlparse, urlunparse
 
+from dotenv import load_dotenv
+
+# Nạp .env ngay khi import config -> cả CLI lẫn API đều đọc được ANTHROPIC_API_KEY.
+# config bị mọi module import nên đây là chỗ duy nhất cần gọi.
+load_dotenv()
+
 DB_PATH = os.getenv("DOAN_DB", "doan.db")
 MODEL = "claude-opus-5"
 
