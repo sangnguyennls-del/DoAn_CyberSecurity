@@ -30,6 +30,31 @@
   </div>
 </form>
 
+{% if chart|length > 1 %}
+<h2 style="font-size:18px;margin-bottom:12px">Diễn biến số lỗ hổng</h2>
+<div class="panel" style="background:#fff;border:1px solid var(--line);border-radius:8px;padding:20px;margin-bottom:26px">
+  {# SVG viết tay - không kéo thư viện chart về cho một biểu đồ cột #}
+  <svg viewBox="0 0 {{ chart|length * 46 }} 150" style="width:100%;max-width:720px;height:150px"
+       role="img" aria-label="Số lỗ hổng qua các lần quét">
+    {% for s in chart %}
+    {% set h = (s.n_findings / chart_max * 100) if chart_max else 0 %}
+    <g transform="translate({{ loop.index0 * 46 }},0)">
+      <rect x="8" y="{{ 115 - h }}" width="30" height="{{ h if h > 1 else 1 }}"
+            rx="3" fill="#1d4ed8" opacity="0.85"></rect>
+      <text x="23" y="{{ 110 - h }}" text-anchor="middle" font-size="12"
+            fill="#0f172a">{{ s.n_findings }}</text>
+      <text x="23" y="132" text-anchor="middle" font-size="11" fill="#64748b">#{{ s.id }}</text>
+      <text x="23" y="146" text-anchor="middle" font-size="9" fill="#94a3b8">{{ s.target[-9:] }}</text>
+    </g>
+    {% endfor %}
+  </svg>
+  <p class="muted" style="margin:6px 0 0;font-size:13px">
+    Cột thấp dần sau khi vá là dấu hiệu tốt &mdash; nhưng phải mở trang
+    <a href="/compare">So sánh</a> mới biết lỗ hổng nào mất và có lỗ hổng nào mới sinh ra.
+  </p>
+</div>
+{% endif %}
+
 <h2 style="font-size:18px;margin-bottom:12px">Lịch sử quét</h2>
 
 {% if scans %}

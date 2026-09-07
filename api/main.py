@@ -56,8 +56,15 @@ def _scan_context(conn, scan_id: int) -> dict:
 def index(request: Request, error: str = ""):
     conn = db.connect()
     try:
+        scans = db.list_scans(conn)
+        done = [s for s in scans if s["status"] == "done"]
         return templates.TemplateResponse(request, "index.html", {
-            "page": "index", "scans": db.list_scans(conn), "error": error,
+            "page": "index",
+            "scans": scans,
+            "error": error,
+            # Biểu đồ diễn biến: cũ -> mới, tối đa 15 lần quét gần nhất
+            "chart": list(reversed(done[:15])),
+            "chart_max": max((s["n_findings"] for s in done[:15]), default=0),
         })
     finally:
         conn.close()
