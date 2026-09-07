@@ -36,7 +36,7 @@ copy .env.example .env      # rồi điền ANTHROPIC_API_KEY vào .env
 Kéo image (lần đầu khá lâu, ZAP ~1.5GB):
 
 ```powershell
-docker pull sullo/nikto
+docker pull ghcr.io/sullo/nikto
 docker pull ghcr.io/zaproxy/zaproxy:stable
 docker pull bkimminich/juice-shop
 ```
