@@ -110,7 +110,7 @@ lời AI là chấm bài bằng đáp án của người làm bài, số liệu 
 pytest -q
 ```
 
-36 test chạy hoàn toàn offline — không cần Docker, không gọi API, không cần mạng.
+39 test chạy hoàn toàn offline — không cần Docker, không gọi API, không cần mạng.
 
 ## Kiến trúc
 

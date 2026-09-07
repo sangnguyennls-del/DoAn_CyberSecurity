@@ -297,3 +297,86 @@ def test_zap_variants_of_same_plugin_stay_separate():
     ]}]})
     assert len({f.fingerprint for f in findings}) == 2, "hai biến thể phải khác fingerprint"
     assert len(dedupe(findings)) == 2, "dedupe không được gộp hai biến thể khác nhau"
+
+
+# ------------------------------------------------ pipeline đánh giá (eval/)
+
+def _seeded_db(monkeypatch, tmp_path):
+    """DB tạm với 3 lỗ hổng + phân tích AI giả, đủ để chạy hết đường eval."""
+    conn = db.connect(":memory:")
+    scan_id = db.start_scan(conn, "http://localhost:3000")
+    findings = [mk("A", sev="High"), mk("B", sev="Medium"), mk("C", sev="Low")]
+    db.save_findings(conn, scan_id, findings)
+    db.put_cached(conn, "claude-opus-5", [
+        {"fingerprint": findings[0].fingerprint, "severity_ai": "Critical",
+         "false_positive_risk": "Thấp"},
+        {"fingerprint": findings[1].fingerprint, "severity_ai": "Medium",
+         "false_positive_risk": "Cao"},
+        {"fingerprint": findings[2].fingerprint, "severity_ai": "Info",
+         "false_positive_risk": "Cao"},
+    ])
+    monkeypatch.setattr(db, "connect", lambda *a, **k: conn)
+    return conn, scan_id, findings
+
+
+def test_metrics_runs_end_to_end(monkeypatch, tmp_path, capsys):
+    from eval import metrics
+    _, scan_id, findings = _seeded_db(monkeypatch, tmp_path)
+
+    csv_path = tmp_path / "gt.csv"
+    rows = [
+        # A: lỗ hổng thật, AI nói thật      -> TN
+        (findings[0].fingerprint, "1", "1"),
+        # B: lỗ hổng thật, AI nói FP        -> FP (bác nhầm lỗ hổng thật)
+        (findings[1].fingerprint, "1", "0"),
+        # C: đúng là FP, AI nói FP          -> TP
+        (findings[2].fingerprint, "0", ""),
+    ]
+    csv_path.write_text(
+        "fingerprint,is_true_positive,patch_ok,name\n"
+        + "".join(f"{fp},{tp},{ok},x\n" for fp, tp, ok in rows),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(metrics, "GROUND_TRUTH", csv_path)
+
+    assert metrics.main(scan_id) == 0
+    out = capsys.readouterr().out
+    assert "Precision" in out and "Recall" in out
+    assert "1 lần AI bác nhầm lỗ hổng thật" in out
+    assert "3 phát hiện" in out, "phải tính trên đúng 3 mẫu có cả nhãn lẫn phân tích"
+
+
+def test_metrics_ignores_unlabelled_rows(monkeypatch, tmp_path):
+    from eval import metrics
+    csv_path = tmp_path / "gt.csv"
+    csv_path.write_text(
+        "fingerprint,is_true_positive,patch_ok,name\n"
+        "aaa,1,,x\n"
+        "bbb,,,x\n"        # chưa gán -> phải bị bỏ qua
+        "ccc,khong-hop-le,,x\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(metrics, "GROUND_TRUTH", csv_path)
+    assert set(metrics.load_labels()) == {"aaa"}
+
+
+def test_export_preserves_existing_labels(monkeypatch, tmp_path):
+    """Chạy lại export không được xoá công sức gán nhãn của người dùng."""
+    from eval import export
+    _, scan_id, findings = _seeded_db(monkeypatch, tmp_path)
+    out = tmp_path / "gt.csv"
+    monkeypatch.setattr(export, "OUT", out)
+
+    export.main(scan_id)
+    text = out.read_text(encoding="utf-8-sig")
+    text = text.replace(f"{findings[0].fingerprint},zap,High,Critical,Thấp,A,,,,",
+                        f"{findings[0].fingerprint},zap,High,Critical,Thấp,A,1,1,ghi chú,an")
+    out.write_text(text, encoding="utf-8-sig")
+
+    export.main(scan_id)  # chạy lại
+    import csv as _csv
+    with out.open(encoding="utf-8-sig", newline="") as f:
+        rows = {r["fingerprint"]: r for r in _csv.DictReader(f)}
+    kept = rows[findings[0].fingerprint]
+    assert kept["is_true_positive"] == "1" and kept["patch_ok"] == "1"
+    assert kept["note"] == "ghi chú" and kept["labeled_by"] == "an"
