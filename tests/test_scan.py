@@ -253,7 +253,7 @@ def test_auth_profile_requires_credentials(monkeypatch, tmp_path):
     """Thiếu tài khoản phải báo lỗi rõ ràng, không sinh plan rỗng."""
     monkeypatch.delenv("ZAP_AUTH_USER", raising=False)
     monkeypatch.delenv("ZAP_AUTH_PASS", raising=False)
-    with pytest.raises(zap.MissingCredentials):
+    with pytest.raises(zap.AuthSetupFailed):
         zap.docker_args("http://localhost:3000", str(tmp_path), "auth")
 
 

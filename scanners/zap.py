@@ -12,11 +12,11 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from core.config import DOCKER_HOST_ALIAS
 from core.models import ZAP_RISKCODE, Finding, clean_html, fingerprint
 
 IMAGE = "ghcr.io/zaproxy/zaproxy:stable"
 OUTFILE = "zap.json"
-DOCKER_ALIAS = "host.docker.internal"
 PLAN_TEMPLATE = Path(__file__).parent / "zap_auth.yaml"
 PLAN_FILE = "af-plan.yaml"
 
@@ -36,10 +36,6 @@ class AuthSetupFailed(Exception):
     """Không thiết lập được quét-có-đăng-nhập: thiếu tài khoản, hoặc đăng nhập hỏng."""
 
 
-# Giữ tên cũ để code/test cũ không gãy
-MissingCredentials = AuthSetupFailed
-
-
 def _verify_login(container_url: str, login_url: str, body: str,
                   user: str, password: str, check_path: str) -> None:
     """Đăng nhập thử TRƯỚC khi khởi động ZAP. Hỏng thì raise.
@@ -53,8 +49,8 @@ def _verify_login(container_url: str, login_url: str, body: str,
     kiểm tra phải nằm ở đây, nơi mình quyết định được điều gì xảy ra tiếp theo.
     """
     # Container thấy host.docker.internal, còn tiến trình này chạy trên host
-    host = container_url.replace(DOCKER_ALIAS, "localhost")
-    login = login_url.replace(DOCKER_ALIAS, "localhost")
+    host = container_url.replace(DOCKER_HOST_ALIAS, "localhost")
+    login = login_url.replace(DOCKER_HOST_ALIAS, "localhost")
     payload = body.replace("{%username%}", user).replace("{%password%}", password)
 
     def _get(url, headers=None):
