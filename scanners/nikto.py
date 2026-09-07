@@ -35,7 +35,7 @@ def parse(data) -> list[Finding]:
             url = v.get("url") or "/"
             # Nikto không xếp hạng nghiêm trọng -> để Info, AI sẽ đánh giá lại
             out.append(Finding(
-                fingerprint=fingerprint("nikto", str(v.get("id", msg[:40])), url),
+                fingerprint=fingerprint("nikto", str(v.get("id", msg[:40]))),
                 source="nikto",
                 name=msg[:90] or "Nikto finding",
                 severity="Info",

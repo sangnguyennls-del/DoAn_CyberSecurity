@@ -37,15 +37,14 @@ def parse(data) -> list[Finding]:
             instances = a.get("instances") or []
             urls = [i.get("uri", "") for i in instances if i.get("uri")]
             evidence = next((i.get("evidence") for i in instances if i.get("evidence")), "")
-            first_url = urls[0] if urls else site.get("@name", "/")
             # pluginid ổn định hơn tên hiển thị -> dùng làm khoá fingerprint
             key = str(a.get("pluginid") or a.get("alertRef") or a.get("name", ""))
             out.append(Finding(
-                fingerprint=fingerprint("zap", key, first_url),
+                fingerprint=fingerprint("zap", key),
                 source="zap",
                 name=a.get("name") or a.get("alert") or "ZAP alert",
                 severity=ZAP_RISKCODE.get(str(a.get("riskcode", "0")), "Info"),
-                urls=urls[:3],
+                urls=urls[:5],
                 count=int(a.get("count") or len(instances) or 1),
                 evidence=clean_html(evidence),
                 description=clean_html(a.get("desc", "")),

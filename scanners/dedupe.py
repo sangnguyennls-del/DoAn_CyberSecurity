@@ -17,9 +17,9 @@ def dedupe(findings: list[Finding]) -> list[Finding]:
             merged[f.fingerprint] = f.model_copy(deep=True)
             continue
         cur.count += f.count
-        # giữ tối đa 3 URL mẫu, không trùng
+        # giữ tối đa 5 URL mẫu, không trùng
         for u in f.urls:
-            if u not in cur.urls and len(cur.urls) < 3:
+            if u not in cur.urls and len(cur.urls) < 5:
                 cur.urls.append(u)
         # giữ mức nghiêm trọng cao nhất
         if SEVERITY_ORDER.get(f.severity, 9) < SEVERITY_ORDER.get(cur.severity, 9):

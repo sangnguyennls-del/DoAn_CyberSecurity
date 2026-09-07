@@ -101,15 +101,20 @@ Sửa hai file này là ảnh hưởng cả 5 người. **Bàn với cả nhóm 
 
 ### `fingerprint` — điểm thiết kế cốt lõi
 
-`sha256(source | mã_plugin | đường_dẫn)`, cắt còn 16 ký tự. Một trường làm bốn việc:
+`sha256(source | mã_plugin)`, cắt còn 16 ký tự. Một trường làm bốn việc:
 
 1. gom trùng trong một lần quét (ZAP lặp cùng alert trên hàng chục URL)
 2. so sánh giữa hai lần quét — diff chỉ là phép toán tập hợp
 3. khoá cache kết quả AI — quét lại target cũ gần như miễn phí
 4. khoá join với bảng ground truth khi đánh giá độ chính xác
 
-Query string bị bỏ khi tính: cùng một lỗi trên `/search?q=a` và `/search?q=b` là **một** lỗ
-hổng, không phải hai.
+**URL cố ý không nằm trong khoá.** Đo thật trên Juice Shop: test "backup/cert file found"
+của Nikto khớp **140 URL khác nhau**. Nếu tính cả đường dẫn thì thành 140 lỗ hổng riêng biệt,
+trong khi thực chất là *một* vấn đề với *một* bản vá — vừa làm báo cáo không đọc nổi, vừa
+vượt `max_tokens` khi gửi lên API.
+
+Số URL bị ảnh hưởng không mất đi: xem `count` (số thật) và `urls` (5 mẫu). Cách này cũng làm
+diff giữa hai lần quét bền hơn — đổi đường dẫn không tạo ra lỗ hổng "mới" giả.
 
 ## Phân công
 

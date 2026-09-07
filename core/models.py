@@ -10,8 +10,6 @@ import hashlib
 import html
 import re
 from typing import Literal
-from urllib.parse import urlparse
-
 from pydantic import BaseModel, Field
 
 Source = Literal["nikto", "zap"]
@@ -28,7 +26,7 @@ def clean_html(s: str) -> str:
     return " ".join(html.unescape(_TAG_RE.sub(" ", s or "")).split())
 
 
-def fingerprint(source: str, key: str, url: str) -> str:
+def fingerprint(source: str, key: str) -> str:
     """Khoá định danh một LOẠI lỗ hổng, ổn định giữa các lần quét.
 
     Làm bốn việc cùng lúc:
@@ -38,11 +36,17 @@ def fingerprint(source: str, key: str, url: str) -> str:
       4. khoá join với bảng ground truth
 
     `key` là mã test/plugin của scanner (ổn định hơn tên hiển thị).
-    Bỏ query string: cùng một lỗi trên /search?q=a và /search?q=b là MỘT lỗ hổng.
+
+    CỐ Ý KHÔNG đưa URL vào khoá. Đo trên Juice Shop: test "backup/cert file found"
+    của Nikto khớp 140 URL khác nhau. Nếu tính cả path thì thành 140 lỗ hổng riêng
+    biệt, trong khi thực chất là MỘT vấn đề với một bản vá duy nhất - vừa làm báo
+    cáo không đọc nổi, vừa vượt max_tokens khi gửi lên API.
+
+    Số URL bị ảnh hưởng không mất đi: xem `Finding.count` và `Finding.urls`.
+    Việc này cũng làm diff giữa hai lần quét bền hơn - đổi đường dẫn không tạo ra
+    lỗ hổng "mới" giả.
     """
-    path = urlparse(url).path or "/"
-    raw = f"{source}|{key}|{path}"
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256(f"{source}|{key}".encode("utf-8")).hexdigest()[:16]
 
 
 class Finding(BaseModel):
@@ -52,7 +56,7 @@ class Finding(BaseModel):
     source: Source
     name: str
     severity: str = "Info"          # High | Medium | Low | Info
-    urls: list[str] = Field(default_factory=list)   # tối đa 3 URL mẫu
+    urls: list[str] = Field(default_factory=list)   # tối đa 5 URL mẫu
     count: int = 1                  # số lần xuất hiện thật (trước khi gom)
     evidence: str = ""
     description: str = ""

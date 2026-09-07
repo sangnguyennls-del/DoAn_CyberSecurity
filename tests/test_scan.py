@@ -40,7 +40,7 @@ def test_zap_parse_strips_html_and_caps_urls():
     csp = next(x for x in zap.parse(load("zap.json")) if x.cwe == "693" and "CSP" in x.name)
     assert "<p>" not in csp.description
     assert csp.description.startswith("Content Security Policy")
-    assert len(csp.urls) == 3, "chỉ giữ tối đa 3 URL mẫu"
+    assert len(csp.urls) == 4, "giữ tối đa 5 URL mẫu; fixture có 4"
     assert csp.count == 4, "count phải là số lần xuất hiện thật, không phải số URL đã giữ"
 
 
@@ -60,30 +60,39 @@ def test_nikto_parse_accepts_list_form():
 
 # ------------------------------------------------------------- fingerprint
 
-def test_fingerprint_ignores_query_string():
-    """Cùng một lỗi trên /search?q=a và /search?q=b là MỘT lỗ hổng, không phải hai."""
-    a = fingerprint("zap", "40012", "http://localhost:3000/search?q=aaa")
-    b = fingerprint("zap", "40012", "http://localhost:3000/search?q=bbb")
-    assert a == b
+def test_fingerprint_separates_different_plugins():
+    assert fingerprint("zap", "40012") != fingerprint("zap", "10038")
 
 
-def test_fingerprint_separates_different_paths():
-    a = fingerprint("zap", "40012", "http://localhost:3000/search")
-    b = fingerprint("zap", "40012", "http://localhost:3000/login")
-    assert a != b
+def test_fingerprint_separates_scanners():
+    """Nikto và ZAP có thể trùng mã test - phải tách theo nguồn."""
+    assert fingerprint("nikto", "999103") != fingerprint("zap", "999103")
 
 
 def test_fingerprint_stable_across_runs():
     """Nếu fingerprint không ổn định thì diff giữa hai lần quét vô nghĩa."""
-    args = ("nikto", "999103", "http://localhost:3000/")
-    assert fingerprint(*args) == fingerprint(*args)
+    assert fingerprint("nikto", "999103") == fingerprint("nikto", "999103")
+
+
+def test_one_nikto_test_across_many_urls_collapses_to_one_finding():
+    """Hồi quy cho ca đo được thật trên Juice Shop: test "backup/cert file found"
+    của Nikto khớp 140 URL. Đó là MỘT vấn đề với một bản vá, không phải 140."""
+    data = {"vulnerabilities": [
+        {"id": "999986", "method": "GET", "url": f"/backup{i}.bak",
+         "msg": "Potentially interesting backup/cert file found."}
+        for i in range(140)
+    ]}
+    merged = dedupe(nikto.parse(data))
+    assert len(merged) == 1, "140 URL cùng một test phải gom về 1 lỗ hổng"
+    assert merged[0].count == 140, "số URL bị ảnh hưởng không được mất"
+    assert len(merged[0].urls) == 5, "chỉ giữ 5 URL mẫu cho báo cáo đọc được"
 
 
 # ----------------------------------------------------------------- dedupe
 
 def mk(key: str, url: str = "/", sev: str = "Info", count: int = 1) -> Finding:
     return Finding(
-        fingerprint=fingerprint("zap", key, url), source="zap", name=key,
+        fingerprint=fingerprint("zap", key), source="zap", name=key,
         severity=sev, urls=[url], count=count,
     )
 
@@ -100,12 +109,14 @@ def test_dedupe_keeps_highest_severity():
     assert out[0].severity == "High"
 
 
-def test_dedupe_caps_urls_at_three():
+def test_dedupe_caps_urls_at_five():
     same = [
         Finding(fingerprint="same", source="zap", name="A", urls=[f"/p?i={i}"], count=1)
-        for i in range(6)
+        for i in range(20)
     ]
-    assert len(dedupe(same)[0].urls) == 3
+    out = dedupe(same)[0]
+    assert len(out.urls) == 5
+    assert out.count == 20, "cắt bớt URL mẫu nhưng count phải giữ đủ"
 
 
 def test_dedupe_sorts_by_severity():
