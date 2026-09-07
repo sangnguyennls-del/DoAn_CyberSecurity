@@ -88,10 +88,23 @@ quét, nhờ đó chạm được phần sau màn login (giỏ hàng, thông tin
 python scan.py http://localhost:3000 --profile auth
 ```
 
-Dùng ZAP Automation Framework (`scanners/zap_auth.yaml`), mặc định cấu hình cho Juice Shop;
-target khác thì đè bằng `ZAP_LOGIN_URL` / `ZAP_LOGIN_BODY`. Tài khoản **không hardcode trong
-repo** — kể cả tài khoản lab, vì thói quen commit mật khẩu rất dễ mang sang project thật.
-Thiếu tài khoản thì ZAP bị bỏ qua kèm cảnh báo, Nikto vẫn chạy.
+Dùng ZAP Automation Framework (`scanners/zap_auth.yaml`) với `spiderAjax` — Juice Shop là SPA
+Angular nên spider thường chỉ thấy `index.html` (đo thật: 149 URL so với 1.077 URL của
+spiderAjax). Mặc định cấu hình cho Juice Shop; target khác thì đè bằng `ZAP_LOGIN_URL` /
+`ZAP_LOGIN_BODY` / `ZAP_AUTH_CHECK_PATH`.
+
+Tài khoản **không hardcode trong repo** — kể cả tài khoản lab, vì thói quen commit mật khẩu
+rất dễ mang sang project thật.
+
+**Đăng nhập được kiểm tra trước khi khởi động ZAP**, không phó mặc cho ZAP. Lý do: đã thử để
+ZAP tự kiểm bằng job `requestor` với `failOnError: true`, nhưng đo thật với mật khẩu sai thì
+ZAP coi lệch response code là *warning* — nó vẫn crawl hết và vẫn sinh báo cáo. Kết quả là một
+lần quét **ẩn danh trông y hệt** lần quét có đăng nhập. Với một đồ án lấy bằng chứng làm trung
+tâm thì đó là kiểu hỏng tệ nhất: không báo lỗi, chỉ âm thầm sai.
+
+Nên công cụ tự đăng nhập thử, lấy token, gọi một endpoint cần quyền (`/api/Cards` — trả 401
+khi chưa đăng nhập; `/rest/user/whoami` **không** dùng được vì trả 200 cả hai trường hợp).
+Hỏng thì dừng ngay dưới 1 giây kèm thông báo rõ, ZAP bị bỏ qua còn Nikto vẫn chạy.
 
 ## Đánh giá độ chính xác của AI
 
@@ -110,7 +123,7 @@ lời AI là chấm bài bằng đáp án của người làm bài, số liệu 
 pytest -q
 ```
 
-39 test chạy hoàn toàn offline — không cần Docker, không gọi API, không cần mạng.
+42 test chạy hoàn toàn offline — không cần Docker, không gọi API, không cần mạng.
 
 ## Kiến trúc
 
