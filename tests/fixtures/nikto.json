@@ -1,0 +1,36 @@
+{
+  "host": "host.docker.internal",
+  "ip": "192.168.65.254",
+  "port": "3000",
+  "banner": "",
+  "vulnerabilities": [
+    {
+      "id": "999957",
+      "method": "GET",
+      "url": "/",
+      "msg": "The X-XSS-Protection header is not defined. This header can hint to the user agent to protect against some forms of XSS",
+      "OSVDB": "0"
+    },
+    {
+      "id": "999103",
+      "method": "GET",
+      "url": "/",
+      "msg": "The anti-clickjacking X-Frame-Options header is not present.",
+      "OSVDB": "0"
+    },
+    {
+      "id": "600300",
+      "method": "GET",
+      "url": "/ftp/",
+      "msg": "Directory indexing found.",
+      "OSVDB": "0"
+    },
+    {
+      "id": "999986",
+      "method": "GET",
+      "url": "/",
+      "msg": "Uncommon header 'feature-policy' found, with contents: payment 'self'",
+      "OSVDB": "0"
+    }
+  ]
+}

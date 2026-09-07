@@ -1,0 +1,82 @@
+{
+  "@programName": "ZAP",
+  "@version": "2.15.0",
+  "@generated": "Sun, 7 Sep 2026 12:00:00",
+  "site": [
+    {
+      "@name": "http://host.docker.internal:3000",
+      "@host": "host.docker.internal",
+      "@port": "3000",
+      "@ssl": "false",
+      "alerts": [
+        {
+          "pluginid": "10038",
+          "alertRef": "10038-1",
+          "alert": "Content Security Policy (CSP) Header Not Set",
+          "name": "Content Security Policy (CSP) Header Not Set",
+          "riskcode": "2",
+          "confidence": "3",
+          "riskdesc": "Medium (High)",
+          "desc": "<p>Content Security Policy (CSP) is an added layer of security that helps to detect and mitigate certain types of attacks, including Cross Site Scripting (XSS) and data injection attacks.</p>",
+          "instances": [
+            { "uri": "http://host.docker.internal:3000/", "method": "GET", "param": "", "attack": "", "evidence": "", "otherinfo": "" },
+            { "uri": "http://host.docker.internal:3000/robots.txt", "method": "GET", "param": "", "attack": "", "evidence": "", "otherinfo": "" },
+            { "uri": "http://host.docker.internal:3000/ftp", "method": "GET", "param": "", "attack": "", "evidence": "", "otherinfo": "" },
+            { "uri": "http://host.docker.internal:3000/assets/main.js", "method": "GET", "param": "", "attack": "", "evidence": "", "otherinfo": "" }
+          ],
+          "count": "4",
+          "solution": "<p>Ensure that your web server, application server, load balancer, etc. is configured to set the Content-Security-Policy header.</p>",
+          "reference": "<p>https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP</p>",
+          "cweid": "693",
+          "wascid": "15",
+          "sourceid": "1"
+        },
+        {
+          "pluginid": "10021",
+          "alertRef": "10021",
+          "alert": "X-Content-Type-Options Header Missing",
+          "name": "X-Content-Type-Options Header Missing",
+          "riskcode": "1",
+          "confidence": "2",
+          "riskdesc": "Low (Medium)",
+          "desc": "<p>The Anti-MIME-Sniffing header X-Content-Type-Options was not set to 'nosniff'.</p>",
+          "instances": [
+            { "uri": "http://host.docker.internal:3000/", "method": "GET", "param": "", "attack": "", "evidence": "", "otherinfo": "" }
+          ],
+          "count": "1",
+          "solution": "<p>Ensure that the application/web server sets the Content-Type header appropriately, and that it sets the X-Content-Type-Options header to 'nosniff'.</p>",
+          "reference": "<p>https://owasp.org/www-community/attacks/Content_Sniffing</p>",
+          "cweid": "693",
+          "wascid": "15",
+          "sourceid": "1"
+        },
+        {
+          "pluginid": "40012",
+          "alertRef": "40012",
+          "alert": "Cross Site Scripting (Reflected)",
+          "name": "Cross Site Scripting (Reflected)",
+          "riskcode": "3",
+          "confidence": "2",
+          "riskdesc": "High (Medium)",
+          "desc": "<p>Cross-site Scripting (XSS) is an attack technique that involves echoing attacker-supplied code into a user's browser instance.</p>",
+          "instances": [
+            {
+              "uri": "http://host.docker.internal:3000/#/search?q=test",
+              "method": "GET",
+              "param": "q",
+              "attack": "<script>alert(1)</script>",
+              "evidence": "<script>alert(1)</script>",
+              "otherinfo": ""
+            }
+          ],
+          "count": "1",
+          "solution": "<p>Phase: Architecture and Design. Use a vetted library or framework that does not allow this weakness to occur.</p>",
+          "reference": "<p>https://owasp.org/www-community/attacks/xss/</p>",
+          "cweid": "79",
+          "wascid": "8",
+          "sourceid": "1"
+        }
+      ]
+    }
+  ]
+}
