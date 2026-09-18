@@ -2,7 +2,11 @@
 
     python -m eval.export  <scan_id>    # xuất phiếu gán nhãn ra CSV
     # ... gán nhãn bằng tay trong Excel ...
-    python -m eval.metrics <scan_id>    # nạp nhãn và in bảng số liệu
+    python -m eval.metrics <scan_id>            # model nào cũng được
+    python -m eval.metrics <scan_id> <model>    # chấm riêng một model
+
+Chấm riêng từng model là cách so sánh hai nhà cung cấp trên CÙNG một tập lỗ hổng và
+CÙNG một bộ nhãn thủ công - đây mới là so sánh có nghĩa, vì cả hai cùng điều kiện.
 
 Đây là phần biến đồ án từ "ghép công cụ" thành "có đánh giá". Không có phần này thì
 không trả lời được câu hỏi quan trọng nhất: AI nói có đúng không?
@@ -86,13 +90,17 @@ def confusion(pairs: list[tuple[dict, dict]]) -> tuple[int, int, int, int]:
     return tp, fp, fn, tn
 
 
-def main(scan_id: int) -> int:
+def main(scan_id: int, model: str | None = None) -> int:
     conn = db.connect()
     findings = db.get_findings(conn, scan_id)
-    analyses = db.get_cached(conn, [f.fingerprint for f in findings])
+    analyses = db.get_cached(conn, [f.fingerprint for f in findings], model)
     labels = load_labels()
 
     if not analyses:
+        have = db.models_with_analyses(conn, scan_id)
+        if model and have:
+            sys.exit(f"Lần quét #{scan_id} không có phân tích của {model!r}. "
+                     f"Đã có: {', '.join(have)}")
         sys.exit(f"Lần quét #{scan_id} chưa có phân tích AI. Chạy lại không kèm --no-ai.")
 
     # Chỉ tính trên phần vừa có nhãn thật vừa có dự đoán của AI
@@ -115,7 +123,7 @@ def main(scan_id: int) -> int:
     )
 
     print(f"""
-=== ĐÁNH GIÁ AI - LẦN QUÉT #{scan_id} ===
+=== ĐÁNH GIÁ AI - LẦN QUÉT #{scan_id}{f" - {model}" if model else ""} ===
 
 Mẫu: {len(pairs)} phát hiện có cả nhãn thủ công lẫn phân tích AI
       (trên tổng {len(findings)} lỗ hổng riêng biệt, {raw_total} phát hiện thô)
@@ -144,6 +152,6 @@ Ma trận nhầm lẫn (Positive = "đây là false positive"):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        sys.exit("Cách dùng: python -m eval.metrics <scan_id>")
-    raise SystemExit(main(int(sys.argv[1])))
+    if len(sys.argv) not in (2, 3):
+        sys.exit("Cách dùng: python -m eval.metrics <scan_id> [model]")
+    raise SystemExit(main(int(sys.argv[1]), sys.argv[2] if len(sys.argv) == 3 else None))

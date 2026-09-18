@@ -46,11 +46,15 @@ CREATE INDEX IF NOT EXISTS idx_findings_scan ON findings(scan_id);
 CREATE INDEX IF NOT EXISTS idx_findings_fp   ON findings(fingerprint);
 
 -- Cache kết quả AI, dùng chung cho MỌI lần quét
+-- Khoá gồm CẢ model: chạy Claude rồi chạy DeepSeek trên cùng một lần quét thì
+-- phải giữ được hai kết quả song song, nếu không sẽ lấy lại kết quả cũ và không
+-- bao giờ gọi provider thứ hai -> mất luôn khả năng so sánh hai model.
 CREATE TABLE IF NOT EXISTS analyses (
-    fingerprint  TEXT PRIMARY KEY,
+    fingerprint  TEXT NOT NULL,
     model        TEXT NOT NULL,
     created_at   TEXT NOT NULL,
-    json         TEXT NOT NULL
+    json         TEXT NOT NULL,
+    PRIMARY KEY (fingerprint, model)
 );
 
 -- Ground truth gán nhãn thủ công (TV5)
@@ -85,6 +89,24 @@ def _migrate(conn: sqlite3.Connection) -> None:
     for col in ("summary", "priority_json", "warnings_json"):
         if col not in cols:
             conn.execute(f"ALTER TABLE scans ADD COLUMN {col} TEXT")
+
+    # analyses: khoá cũ chỉ có fingerprint. SQLite không đổi được primary key,
+    # phải dựng lại bảng. Giữ nguyên dữ liệu cũ vì đó là tiền API đã trả.
+    info = list(conn.execute("PRAGMA table_info(analyses)"))
+    if info and {r["name"] for r in info if r["pk"]} == {"fingerprint"}:
+        conn.executescript("""
+            ALTER TABLE analyses RENAME TO analyses_old;
+            CREATE TABLE analyses (
+                fingerprint  TEXT NOT NULL,
+                model        TEXT NOT NULL,
+                created_at   TEXT NOT NULL,
+                json         TEXT NOT NULL,
+                PRIMARY KEY (fingerprint, model)
+            );
+            INSERT OR IGNORE INTO analyses (fingerprint, model, created_at, json)
+                SELECT fingerprint, model, created_at, json FROM analyses_old;
+            DROP TABLE analyses_old;
+        """)
     conn.commit()
 
 
@@ -186,14 +208,34 @@ def compare_scans(conn: sqlite3.Connection, scan_a: int, scan_b: int) -> dict[st
 
 # -------------------------------------------------------- cache phân tích
 
-def get_cached(conn: sqlite3.Connection, fingerprints: list[str]) -> dict[str, dict]:
+def get_cached(conn: sqlite3.Connection, fingerprints: list[str],
+               model: str | None = None) -> dict[str, dict]:
+    """Kết quả phân tích đã lưu, theo fingerprint.
+
+    `model=None` -> lấy bản mới nhất của bất kỳ model nào (dùng để hiển thị báo cáo).
+    Truyền `model` khi cần đúng kết quả của MỘT model - bắt buộc với eval so sánh
+    hai provider, và với cache khi đang chạy provider cụ thể.
+    """
     if not fingerprints:
         return {}
     qs = ",".join("?" * len(fingerprints))
-    rows = conn.execute(
-        f"SELECT fingerprint, json FROM analyses WHERE fingerprint IN ({qs})", fingerprints
-    ).fetchall()
-    return {r["fingerprint"]: json.loads(r["json"]) for r in rows}
+    sql = f"SELECT fingerprint, json FROM analyses WHERE fingerprint IN ({qs})"
+    params = list(fingerprints)
+    if model:
+        sql += " AND model = ?"
+        params.append(model)
+    else:
+        sql += " ORDER BY created_at"   # bản sau ghi đè bản trước trong dict
+    return {r["fingerprint"]: json.loads(r["json"]) for r in conn.execute(sql, params)}
+
+
+def models_with_analyses(conn: sqlite3.Connection, scan_id: int) -> list[str]:
+    """Các model đã phân tích lần quét này - để eval biết có gì mà so sánh."""
+    return [r[0] for r in conn.execute("""
+        SELECT DISTINCT a.model FROM analyses a
+        JOIN findings f ON f.fingerprint = a.fingerprint
+        WHERE f.scan_id = ? ORDER BY a.model
+    """, (scan_id,))]
 
 
 def put_cached(conn: sqlite3.Connection, model: str, analyses: list[dict]) -> None:

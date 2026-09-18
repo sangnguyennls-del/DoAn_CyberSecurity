@@ -19,7 +19,7 @@ from pathlib import Path
 import report
 from analyzer.engine import analyze
 from core import db
-from core.config import MODEL, TargetNotAllowed, check_target
+from core.config import AI_PROVIDER, PROVIDERS, TargetNotAllowed, check_target, model_for
 from scanners.runner import run_scan
 
 
@@ -65,13 +65,13 @@ def cmd_scan(args) -> int:
             result = {"analyses": {}, "summary": "", "priority": [], "warnings": []}
             print("Bỏ qua bước phân tích AI (--no-ai).")
         else:
-            result = analyze(findings, conn=conn, progress=print)
+            result = analyze(findings, conn=conn, provider=args.provider, progress=print)
 
         html = report.render(
             findings=findings,
             analyses=result["analyses"],
             target=target,
-            model=MODEL,
+            model=model_for(args.provider),
             summary=result["summary"],
             priority=result["priority"],
             warnings=warnings + result["warnings"],
@@ -138,6 +138,9 @@ def main() -> int:
                    help="baseline = nhanh, chỉ passive. full = có active scan, lâu hơn nhiều. "
                         "auth = đăng nhập trước khi quét (cần ZAP_AUTH_USER/ZAP_AUTH_PASS trong .env).")
     p.add_argument("--no-ai", action="store_true", help="Chỉ chạy scanner, không gọi API")
+    p.add_argument("--provider", choices=list(PROVIDERS), default=AI_PROVIDER,
+                   help="Nhà cung cấp AI. Chạy cả hai trên cùng một lần quét để so sánh "
+                        "(kết quả lưu riêng theo model).")
     p.add_argument("--no-nikto", action="store_true")
     p.add_argument("--no-zap", action="store_true")
     p.add_argument("--allow-external", action="store_true",

@@ -2,8 +2,8 @@
 
 Đồ án môn **Nhập môn đảm bảo an ninh thông tin**.
 
-Nối hai công cụ quét lỗ hổng (**Nikto** + **OWASP ZAP**) với **Claude API** để tự động phân
-tích kết quả scan và đề xuất bản vá cụ thể.
+Nối hai công cụ quét lỗ hổng (**Nikto** + **OWASP ZAP**) với một **mô hình ngôn ngữ**
+(**Claude** hoặc **DeepSeek**) để tự động phân tích kết quả scan và đề xuất bản vá cụ thể.
 
 Scanner trả về hàng trăm phát hiện thô, trùng lặp, lẫn false positive, và không nói phải sửa
 gì. Hệ thống này trả lời ba câu hỏi mà scanner thuần không trả lời được:
@@ -23,14 +23,15 @@ Công cụ mặc định **từ chối** mọi mục tiêu ngoài `localhost` v�
 
 ## Cài đặt
 
-Yêu cầu: **Docker Desktop** (đang chạy), **Python 3.12+**, một **Anthropic API key**.
+Yêu cầu: **Docker Desktop** (đang chạy), **Python 3.12+**, và API key của ít nhất một
+provider (**Anthropic** hoặc **DeepSeek**).
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 
-copy .env.example .env      # rồi điền ANTHROPIC_API_KEY vào .env
+copy .env.example .env      # rồi điền API key vào .env
 ```
 
 Kéo image (lần đầu khá lâu, ZAP ~1.5GB):
@@ -111,6 +112,50 @@ Hỏng thì dừng ngay dưới 1 giây kèm thông báo rõ, ZAP bị bỏ qua 
 `Authentication Request Identified` / `Session Management Response Identified` là bằng chứng
 ZAP đã thật sự nhận ra luồng đăng nhập.
 
+## Chọn mô hình: Claude hay DeepSeek
+
+```powershell
+python scan.py http://localhost:3000 --provider claude
+python scan.py http://localhost:3000 --provider deepseek
+```
+
+Mặc định lấy từ `AI_PROVIDER` trong `.env` (không đặt thì là `claude`). Dashboard có ô chọn
+tương ứng.
+
+| | Claude (`claude-opus-5`) | DeepSeek (`deepseek-v4-pro`) |
+|---|---|---|
+| Ràng buộc đầu ra | **Strict JSON schema** — API bảo đảm đúng schema | Chỉ JSON mode lỏng (`json_object`) |
+| Xử lý ở phía ta | Không cần validate | Nhét schema vào prompt, tự validate, **thử lại 1 lần** |
+| Giá / 1M token | $5 vào / $25 ra | ~$0.66–1.32 vào / ~$1.98–3.96 ra |
+
+Khác biệt quan trọng nhất **không phải giá mà là ràng buộc đầu ra**. DeepSeek không có strict
+schema, nên JSON hỏng là chuyện có thật — tài liệu của họ còn cảnh báo *"the API may
+occasionally return empty content"*. Với đồ án này điều đó đáng lo hơn bình thường: đầu ra
+của AI **chính là dữ liệu** để đo precision/recall, nên vài phân tích rơi lặng lẽ sẽ làm lệch
+số liệu đánh giá mà không ai biết.
+
+Vì vậy nhánh DeepSeek validate bằng Pydantic, thử lại một lần có kèm thông báo lỗi cho model
+tự sửa, và nếu vẫn hỏng thì **báo rõ số lượng nhận được** thay vì im lặng (`... chỉ phân tích
+15/18 lỗ hổng mới`). Schema trong prompt được sinh thẳng từ `analyzer/schema.py`, không chép
+tay, nên không thể lệch.
+
+### So sánh hai mô hình — dùng luôn làm nội dung báo cáo
+
+Cache khoá theo `(fingerprint, model)` nên chạy được cả hai trên **cùng một lần quét**, rồi
+chấm điểm riêng từng bên trên **cùng một bộ nhãn thủ công**:
+
+```powershell
+python scan.py http://localhost:3000 --provider claude
+python scan.py http://localhost:3000 --provider deepseek   # dùng lại findings đã có
+
+python -m eval.export 4                        # gán nhãn MỘT lần, dùng cho cả hai
+python -m eval.metrics 4 claude-opus-5
+python -m eval.metrics 4 deepseek-v4-pro
+```
+
+Cùng lỗ hổng, cùng ground truth, chỉ khác mô hình — đây là so sánh có nghĩa, và là thứ biến
+đồ án từ "chúng em dùng AI" thành "chúng em đo được AI nào tốt hơn cho việc này".
+
 ## Đánh giá độ chính xác của AI
 
 ```powershell
@@ -137,7 +182,7 @@ scan.py (CLI)  ─┐
 api/ (dashboard)─┴─> cùng một bộ hàm bên dưới, cùng một database
    │
    ├── scanners/   Nikto + ZAP qua Docker, chạy song song -> chuẩn hoá -> gom trùng
-   ├── analyzer/   Claude structured output: đánh giá lại + sinh bản vá + cache
+   ├── analyzer/   Gọi Claude hoặc DeepSeek: đánh giá lại + sinh bản vá + cache
    ├── report.py   Dựng context và render HTML (Jinja2, autoescape bắt buộc)
    ├── core/       Hai "hợp đồng" dùng chung: models.Finding và db (SQLite)
    ├── web/        Template dashboard + báo cáo (chung partial _findings.html)
