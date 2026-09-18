@@ -40,6 +40,16 @@ def save_report_file(html: str, path: str) -> tuple[Path | None, str | None]:
                       f"Kết quả vẫn đã lưu, xem bằng dashboard hoặc python scan.py --list.")
 
 
+def _say(msg: str) -> None:
+    """In tiến trình có flush.
+
+    print() mặc định bị buffer theo khối khi stdout không phải terminal, nên
+    `python scan.py ... > log.txt` sẽ không hiện gì suốt 10 phút rồi đổ ra một
+    lượt - nhìn y hệt như bị treo.
+    """
+    print(msg, flush=True)
+
+
 def cmd_scan(args) -> int:
     try:
         target = check_target(args.url, allow_external=args.allow_external)
@@ -57,7 +67,7 @@ def cmd_scan(args) -> int:
             profile=args.profile,
             use_nikto=not args.no_nikto,
             use_zap=not args.no_zap,
-            progress=print,
+            progress=_say,
         )
         db.save_findings(conn, scan_id, findings)
 
@@ -65,7 +75,7 @@ def cmd_scan(args) -> int:
             result = {"analyses": {}, "summary": "", "priority": [], "warnings": []}
             print("Bỏ qua bước phân tích AI (--no-ai).")
         else:
-            result = analyze(findings, conn=conn, progress=print)
+            result = analyze(findings, conn=conn, target=target, progress=_say)
 
         html = report.render(
             findings=findings,

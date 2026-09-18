@@ -57,7 +57,7 @@ def run(scan_id: int, target: str, profile: str, use_ai: bool) -> None:
         db.save_findings(conn, scan_id, findings)
 
         if use_ai:
-            result = analyze(findings, conn=conn, progress=say)
+            result = analyze(findings, conn=conn, target=target, progress=say)
         else:
             say("Bỏ qua bước phân tích AI.")
             result = {"analyses": {}, "summary": "", "priority": [], "warnings": []}
