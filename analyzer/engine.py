@@ -14,9 +14,8 @@ Bốn quyết định thiết kế:
   3. Không bao giờ raise. Lỗi mạng, hết quota, bộ lọc từ chối - tất cả thành
      warning. Báo cáo vẫn ra, chỉ thiếu cột phân tích.
 
-  4. Truyền URL mục tiêu vào prompt. Không có nó, mô hình đoán tầng công nghệ và
-     sinh bản vá sai tầng - đo thật: quét nginx nhưng nhận về code Express, dán
-     vào đâu cũng không được.
+  4. Truyền URL mục tiêu VÀ ngăn xếp dò được vào prompt. Không có chúng, mô hình
+     đoán tầng công nghệ và sinh bản vá sai tầng - xem `detect_stack()`.
 
 Dùng `messages.stream(output_format=ReportOut)`: API bảo đảm đầu ra đúng schema,
 nên không cần validate hay thử lại. Đó là lý do chọn Claude cho đồ án này - đầu ra
@@ -27,6 +26,7 @@ Streaming là bắt buộc chứ không phải tuỳ chọn - xem ghi chú trong
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 
 from analyzer.prompts import SYSTEM_PROMPT
@@ -46,6 +46,39 @@ BATCH_SIZE = 6
 # AI xếp lại mức độ theo thang riêng, có thêm Critical
 AI_SEVERITY_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Info": 4}
 FP_RISK_ORDER = {"Thấp": 0, "Trung bình": 1, "Cao": 2}
+
+# Banner công nghệ hay xuất hiện trong header Server / X-Powered-By
+_STACK_PATTERNS = [
+    re.compile(r"nginx/[\d.]+", re.I),
+    re.compile(r"Apache/[\d.]+", re.I),
+    re.compile(r"Werkzeug/[\d.]+", re.I),
+    re.compile(r"Python/[\d.]+", re.I),
+    re.compile(r"PHP/[\d.]+", re.I),
+    re.compile(r"Microsoft-IIS/[\d.]+", re.I),
+    re.compile(r"\bExpress\b", re.I),
+]
+
+
+def detect_stack(findings: list[Finding]) -> str:
+    """Dò ngăn xếp công nghệ từ TOÀN BỘ kết quả quét.
+
+    Vì sao cần: mô hình suy stack từ evidence của RIÊNG từng lỗ hổng. Đo thật trên
+    target nginx - chỉ đúng MỘT finding có 'nginx/1.31.5' trong evidence của nó
+    (Server Leaks Version) là nhận được bản vá nginx; bốn finding về header khác
+    không có manh mối nào trong evidence riêng nên mô hình đoán là Express và trả
+    về code helmet - dán vào đâu cũng không được.
+
+    Banner chỉ xuất hiện ở một finding nhưng áp dụng cho CẢ mục tiêu, nên phải gom
+    ra đây rồi đưa vào mọi lô.
+    """
+    found: list[str] = []
+    for f in findings:
+        blob = f"{f.evidence} {f.description} {f.name}"
+        for pat in _STACK_PATTERNS:
+            m = pat.search(blob)
+            if m and m.group(0) not in found:
+                found.append(m.group(0))
+    return ", ".join(found)
 
 
 def _payload(f: Finding) -> dict:
@@ -116,11 +149,27 @@ def _result(analyses, summary, priority=None, warnings=None) -> dict:
     }
 
 
-def _call_batch(client, batch: list[Finding], target: str,
+def _build_header(target: str, stack: str) -> str:
+    """Phần mở đầu prompt: mục tiêu là gì và chạy trên nền gì."""
+    lines: list[str] = []
+    if target:
+        lines.append(f"URL mục tiêu: {target}")
+    if stack:
+        lines.append(f"Ngăn xếp dò được từ TOÀN BỘ lần quét: {stack}")
+        lines.append(
+            "Ngăn xếp này áp dụng cho cả mục tiêu, kể cả khi bằng chứng của một "
+            "lỗ hổng cụ thể bên dưới không nhắc tới nó. Lỗ hổng nào vá được ở "
+            "tầng này thì ưu tiên vá ở đây, đừng mặc định là code ứng dụng."
+        )
+    return "\n".join(lines) + "\n\n" if lines else ""
+
+
+def _call_batch(client, batch: list[Finding], target: str, stack: str,
                 model: str) -> tuple[ReportOut, int, int]:
     """Gọi một lô, trả về (kết quả, token vào, token ra). Raise nếu hỏng."""
-    header = f"URL mục tiêu: {target}\n" if target else ""
-    content = header + json.dumps([_payload(f) for f in batch], ensure_ascii=False, indent=1)
+    content = _build_header(target, stack) + json.dumps(
+        [_payload(f) for f in batch], ensure_ascii=False, indent=1
+    )
 
     # PHẢI dùng stream(): với max_tokens lớn, SDK từ chối thẳng lời gọi non-streaming
     # ("Streaming is required for operations that may take longer than 10 minutes").
@@ -175,9 +224,13 @@ def analyze(
         return _result(cached, _summary_from_ai(findings, cached),
                        priority=_priority(findings, cached))
 
+    # Dò trên TOÀN BỘ findings, không chỉ lô hiện tại - banner thường chỉ nằm ở
+    # một finding duy nhất nhưng áp dụng cho cả mục tiêu.
+    stack = detect_stack(findings)
     batches = [todo[i:i + BATCH_SIZE] for i in range(0, len(todo), BATCH_SIZE)]
     say(f"Gọi Claude phân tích {len(todo)} lỗ hổng mới trong {len(batches)} lô "
-        f"({len(cached)} lấy từ cache)...")
+        f"({len(cached)} lấy từ cache)"
+        + (f" | ngăn xếp: {stack}" if stack else " | không dò được ngăn xếp"))
 
     try:
         import anthropic
@@ -195,7 +248,7 @@ def analyze(
 
     for i, batch in enumerate(batches, 1):
         try:
-            out, ti, to = _call_batch(client, batch, target, model)
+            out, ti, to = _call_batch(client, batch, target, stack, model)
         except Exception as e:
             # Một lô hỏng KHÔNG được kéo theo các lô khác - đó là điểm chính của
             # việc chia lô. Lô trước đã trả tiền rồi thì phải giữ lại.

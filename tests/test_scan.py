@@ -416,3 +416,32 @@ def test_report_write_creates_missing_parent_dirs(tmp_path):
     out, warn = save_report_file("<html>xin chào</html>", str(tmp_path / "a" / "b" / "r.html"))
     assert warn is None
     assert out.read_text(encoding="utf-8") == "<html>xin chào</html>"
+
+
+# ------------------------------------------------- dò ngăn xếp công nghệ
+
+def test_detect_stack_finds_server_banner():
+    """Hồi quy: regex từng chứa ký tự backspace nên không khớp gì, detect_stack
+    luôn trả rỗng. Mô hình mất manh mối về stack và sinh bản vá sai tầng - hỏng
+    âm thầm, không test nào bắt được."""
+    from analyzer.engine import detect_stack
+    fs = [
+        Finding(fingerprint="a", source="zap", name="Server Leaks Version",
+                evidence="nginx/1.31.5"),
+        Finding(fingerprint="b", source="zap", name="CSP Header Not Set"),
+    ]
+    assert detect_stack(fs) == "nginx/1.31.5"
+
+
+def test_detect_stack_empty_when_no_banner():
+    from analyzer.engine import detect_stack
+    assert detect_stack([Finding(fingerprint="a", source="zap", name="X")]) == ""
+
+
+def test_batch_header_carries_target_and_stack():
+    """Ngăn xếp phải vào prompt của MỌI lô, không chỉ lô chứa finding có banner."""
+    from analyzer.engine import _build_header
+    h = _build_header("http://localhost:8080", "nginx/1.31.5")
+    assert "http://localhost:8080" in h
+    assert "nginx/1.31.5" in h
+    assert _build_header("", "") == ""
