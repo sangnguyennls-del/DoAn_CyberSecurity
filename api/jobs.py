@@ -46,8 +46,7 @@ def _finish(scan_id: int, status: str) -> None:
             JOBS[scan_id]["status"] = status
 
 
-def run(scan_id: int, target: str, profile: str, use_ai: bool,
-        provider: str | None = None) -> None:
+def run(scan_id: int, target: str, profile: str, use_ai: bool) -> None:
     """Chạy trong thread riêng của FastAPI. Mọi lỗi đều được ghi lại, không ném ra ngoài."""
     # sqlite3 không cho dùng chung connection giữa các thread -> mở riêng ở đây
     conn = db.connect()
@@ -58,7 +57,7 @@ def run(scan_id: int, target: str, profile: str, use_ai: bool,
         db.save_findings(conn, scan_id, findings)
 
         if use_ai:
-            result = analyze(findings, conn=conn, provider=provider, progress=say)
+            result = analyze(findings, conn=conn, progress=say)
         else:
             say("Bỏ qua bước phân tích AI.")
             result = {"analyses": {}, "summary": "", "priority": [], "warnings": []}

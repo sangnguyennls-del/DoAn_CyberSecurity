@@ -19,7 +19,7 @@ from fastapi.templating import Jinja2Templates
 import report
 from api import jobs
 from core import db
-from core.config import AI_PROVIDER, MODEL, PROVIDERS, TargetNotAllowed, check_target
+from core.config import MODEL, TargetNotAllowed, check_target
 
 ROOT = Path(__file__).resolve().parent.parent
 app = FastAPI(title="AI hỗ trợ quét lỗ hổng bảo mật Web")
@@ -62,8 +62,6 @@ def index(request: Request, error: str = ""):
             "page": "index",
             "scans": scans,
             "error": error,
-            "providers": PROVIDERS,
-            "provider": AI_PROVIDER,
             # Biểu đồ diễn biến: cũ -> mới, tối đa 15 lần quét gần nhất
             "chart": list(reversed(done[:15])),
             "chart_max": max((s["n_findings"] for s in done[:15]), default=0),
@@ -78,7 +76,6 @@ def start_scan(
     target: str = Form(...),
     profile: str = Form("baseline"),
     use_ai: str = Form(""),
-    provider: str = Form(AI_PROVIDER),
 ):
     # Ranh giới an toàn phải chặn ở CẢ CLI LẪN API, không chỉ một chỗ
     try:
@@ -95,7 +92,7 @@ def start_scan(
 
     jobs.new_job(scan_id)
     # Hàm đồng bộ -> FastAPI chạy nó trong threadpool, không chặn event loop
-    background.add_task(jobs.run, scan_id, target, profile, bool(use_ai), provider)
+    background.add_task(jobs.run, scan_id, target, profile, bool(use_ai))
     return RedirectResponse(f"/scans/{scan_id}", status_code=303)
 
 

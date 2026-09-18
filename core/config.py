@@ -18,25 +18,7 @@ load_dotenv()
 
 DB_PATH = os.getenv("DOAN_DB", "doan.db")
 
-# --- Nhà cung cấp AI ------------------------------------------------------
-# Hai provider dùng chung một schema đầu ra, nên chạy được cả hai trên cùng một
-# lần quét rồi so sánh - xem `python -m eval.metrics <scan_id> --model <tên>`.
-PROVIDERS = ("claude", "deepseek")
-AI_PROVIDER = os.getenv("AI_PROVIDER", "claude").strip().lower()
-
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-opus-5")
-DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro")
-DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-
-# Giữ tên MODEL cho code cũ: model mặc định của provider đang bật
-MODEL = DEEPSEEK_MODEL if AI_PROVIDER == "deepseek" else CLAUDE_MODEL
-
-
-def model_for(provider: str) -> str:
-    """Tên model của một provider. Tên này là khoá cache và khoá so sánh."""
-    if provider not in PROVIDERS:
-        raise ValueError(f"Provider không hợp lệ: {provider!r}. Chọn một trong {PROVIDERS}.")
-    return DEEPSEEK_MODEL if provider == "deepseek" else CLAUDE_MODEL
+MODEL = "claude-opus-5"
 
 # Container Docker không thấy localhost của máy host
 DOCKER_HOST_ALIAS = "host.docker.internal"

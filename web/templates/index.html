@@ -25,14 +25,6 @@
         <option value="auth">auth — đăng nhập trước khi quét (cần .env)</option>
       </select>
     </div>
-    <div>
-      <label for="provider">AI phân tích</label>
-      <select id="provider" name="provider">
-        {% for pv in providers %}
-        <option value="{{ pv }}" {% if pv == provider %}selected{% endif %}>{{ pv }}</option>
-        {% endfor %}
-      </select>
-    </div>
     <label class="check"><input type="checkbox" name="use_ai" value="1" checked> Phân tích bằng AI</label>
     <button type="submit">Bắt đầu quét</button>
   </div>

@@ -45,10 +45,10 @@ CREATE TABLE IF NOT EXISTS findings (
 CREATE INDEX IF NOT EXISTS idx_findings_scan ON findings(scan_id);
 CREATE INDEX IF NOT EXISTS idx_findings_fp   ON findings(fingerprint);
 
--- Cache kết quả AI, dùng chung cho MỌI lần quét
--- Khoá gồm CẢ model: chạy Claude rồi chạy DeepSeek trên cùng một lần quét thì
--- phải giữ được hai kết quả song song, nếu không sẽ lấy lại kết quả cũ và không
--- bao giờ gọi provider thứ hai -> mất luôn khả năng so sánh hai model.
+-- Cache kết quả AI, dùng chung cho MỌI lần quét.
+-- Khoá gồm cả `model`: đổi sang bản Claude mới thì phân tích lại, thay vì lặng lẽ
+-- dùng lại kết quả của model cũ rồi gán nhãn model mới - số liệu trong eval/ phải
+-- nói đúng model nào sinh ra nó.
 CREATE TABLE IF NOT EXISTS analyses (
     fingerprint  TEXT NOT NULL,
     model        TEXT NOT NULL,
@@ -212,9 +212,8 @@ def get_cached(conn: sqlite3.Connection, fingerprints: list[str],
                model: str | None = None) -> dict[str, dict]:
     """Kết quả phân tích đã lưu, theo fingerprint.
 
-    `model=None` -> lấy bản mới nhất của bất kỳ model nào (dùng để hiển thị báo cáo).
-    Truyền `model` khi cần đúng kết quả của MỘT model - bắt buộc với eval so sánh
-    hai provider, và với cache khi đang chạy provider cụ thể.
+    Khoá gồm cả model nên đổi MODEL (ví dụ sang bản Claude mới) sẽ phân tích lại
+    thay vì lặng lẽ dùng lại kết quả của model cũ rồi gán nhãn model mới.
     """
     if not fingerprints:
         return {}
@@ -227,15 +226,6 @@ def get_cached(conn: sqlite3.Connection, fingerprints: list[str],
     else:
         sql += " ORDER BY created_at"   # bản sau ghi đè bản trước trong dict
     return {r["fingerprint"]: json.loads(r["json"]) for r in conn.execute(sql, params)}
-
-
-def models_with_analyses(conn: sqlite3.Connection, scan_id: int) -> list[str]:
-    """Các model đã phân tích lần quét này - để eval biết có gì mà so sánh."""
-    return [r[0] for r in conn.execute("""
-        SELECT DISTINCT a.model FROM analyses a
-        JOIN findings f ON f.fingerprint = a.fingerprint
-        WHERE f.scan_id = ? ORDER BY a.model
-    """, (scan_id,))]
 
 
 def put_cached(conn: sqlite3.Connection, model: str, analyses: list[dict]) -> None:

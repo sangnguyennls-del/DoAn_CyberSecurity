@@ -1,6 +1,6 @@
 """Xuất phiếu gán nhãn ra CSV để gán tay trong Excel.
 
-    python -m eval.export <scan_id> [model]
+    python -m eval.export <scan_id>
 
 Sinh eval/ground_truth.csv với hai cột để trống cho người gán:
 
@@ -30,12 +30,12 @@ COLUMNS = ["fingerprint", "source", "severity_scanner", "severity_ai",
            "fp_risk_ai", "name", "is_true_positive", "patch_ok", "note", "labeled_by"]
 
 
-def main(scan_id: int, model: str | None = None) -> int:
+def main(scan_id: int) -> int:
     conn = db.connect()
     findings = db.get_findings(conn, scan_id)
     if not findings:
         sys.exit(f"Lần quét #{scan_id} không có phát hiện nào.")
-    analyses = db.get_cached(conn, [f.fingerprint for f in findings], model)
+    analyses = db.get_cached(conn, [f.fingerprint for f in findings])
 
     # Giữ nhãn đã gán từ lần trước - không được ghi đè công sức của người gán
     existing: dict[str, dict] = {}
@@ -83,6 +83,6 @@ def main(scan_id: int, model: str | None = None) -> int:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) not in (2, 3):
-        sys.exit("Cách dùng: python -m eval.export <scan_id> [model]")
-    raise SystemExit(main(int(sys.argv[1]), sys.argv[2] if len(sys.argv) == 3 else None))
+    if len(sys.argv) != 2:
+        sys.exit("Cách dùng: python -m eval.export <scan_id>")
+    raise SystemExit(main(int(sys.argv[1])))
