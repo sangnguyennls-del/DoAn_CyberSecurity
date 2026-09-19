@@ -106,6 +106,18 @@ def test_two_different_uncommon_headers_stay_separate():
     assert len(merged) == 2, "hai header khác nhau là hai vấn đề khác nhau"
 
 
+def test_each_missing_security_header_is_its_own_finding():
+    """Hồi quy cho lần quét #18 -> #19: 5 header thiếu từng gộp làm một finding,
+    nên vá 4/5 vẫn bị báo "còn tồn tại" và HSTS hiện bản vá AI viết cho CSP."""
+    headers = ["content-security-policy", "permissions-policy", "referrer-policy",
+               "strict-transport-security", "x-content-type-options"]
+    data = {"vulnerabilities": [
+        {"id": "013587", "method": "GET", "url": "/",
+         "msg": f"Suggested security header missing: {h}."} for h in headers
+    ]}
+    assert len(dedupe(nikto.parse(data))) == 5
+
+
 def test_same_uncommon_header_still_collapses():
     """Mặt còn lại: cùng một header trên nhiều URL vẫn phải gom về một."""
     data = {"vulnerabilities": [
@@ -207,8 +219,50 @@ def test_compare_scans():
 
 def test_analysis_cache_roundtrip():
     conn = db.connect(":memory:")
-    db.put_cached(conn, "claude-opus-5", [{"fingerprint": "abc", "severity_ai": "High"}])
-    assert db.get_cached(conn, ["abc", "xyz"]) == {"abc": {"fingerprint": "abc", "severity_ai": "High"}}
+    t = "http://localhost:3000"
+    db.put_cached(conn, "claude-opus-5", t, [{"fingerprint": "abc", "severity_ai": "High"}])
+    assert db.get_cached(conn, ["abc", "xyz"], t) == {"abc": {"fingerprint": "abc", "severity_ai": "High"}}
+
+
+def test_analysis_cache_is_per_target():
+    """Hồi quy cho ca đo được ở lần quét #18: vulnapp (Flask) nhận bản vá nginx.
+
+    Cùng một lỗ hổng "CSP Header Not Set" nhưng bản vá cho nginx và cho Flask khác
+    hẳn nhau. Cache khoá theo fingerprint thôi thì target sau được phục vụ bản vá
+    của target trước, và báo cáo khuyên `server_tokens off` cho một app không có nginx.
+    """
+    conn = db.connect(":memory:")
+    db.put_cached(conn, "claude-opus-5", "http://localhost:8080",
+                  [{"fingerprint": "csp", "fix_snippet": "add_header ..."}])
+    assert db.get_cached(conn, ["csp"], "http://localhost:5000") == {}
+    assert db.get_cached(conn, ["csp"], "http://localhost:8080")["csp"]["fix_snippet"] == "add_header ..."
+
+
+def test_migration_keeps_old_analyses_with_unknown_target(tmp_path):
+    """DB tạo từ bản cũ (khoá không có target) phải nâng cấp được mà không mất dữ
+    liệu đã trả tiền API, và không được tự đoán target cho dòng cũ."""
+    import sqlite3
+    path = str(tmp_path / "cu.db")
+    old = sqlite3.connect(path)
+    old.executescript("""
+        CREATE TABLE analyses (fingerprint TEXT NOT NULL, model TEXT NOT NULL,
+            created_at TEXT NOT NULL, json TEXT NOT NULL, PRIMARY KEY (fingerprint, model));
+        INSERT INTO analyses VALUES ('abc', 'claude-opus-5', '2026-09-18', '{"fingerprint":"abc"}');
+    """)
+    old.close()
+
+    conn = db.connect(path)
+    rows = conn.execute("SELECT fingerprint, target, json FROM analyses").fetchall()
+    assert [tuple(r) for r in rows] == [("abc", "", '{"fingerprint":"abc"}')]
+    assert db.get_cached(conn, ["abc"], "http://localhost:3000") == {}
+    db.connect(path)  # chạy migration lần hai không được hỏng gì
+
+
+def test_analysis_cache_never_serves_unknown_target():
+    """Dòng cache cũ không rõ sinh cho target nào (target='') không được dùng lại."""
+    conn = db.connect(":memory:")
+    db.put_cached(conn, "claude-opus-5", "", [{"fingerprint": "abc"}])
+    assert db.get_cached(conn, ["abc"], "") == {}
 
 
 def test_findings_roundtrip_preserves_fields():
@@ -351,7 +405,7 @@ def _seeded_db(monkeypatch, tmp_path):
     scan_id = db.start_scan(conn, "http://localhost:3000")
     findings = [mk("A", sev="High"), mk("B", sev="Medium"), mk("C", sev="Low")]
     db.save_findings(conn, scan_id, findings)
-    db.put_cached(conn, "claude-opus-5", [
+    db.put_cached(conn, "claude-opus-5", "http://localhost:3000", [
         {"fingerprint": findings[0].fingerprint, "severity_ai": "Critical",
          "false_positive_risk": "Thấp"},
         {"fingerprint": findings[1].fingerprint, "severity_ai": "Medium",
@@ -377,8 +431,10 @@ def test_metrics_runs_end_to_end(monkeypatch, tmp_path, capsys):
         (findings[2].fingerprint, "0", ""),
     ]
     csv_path.write_text(
-        "fingerprint,is_true_positive,patch_ok,name\n"
-        + "".join(f"{fp},{tp},{ok},x\n" for fp, tp, ok in rows),
+        "fingerprint,target,is_true_positive,patch_ok,name\n"
+        + "".join(f"{fp},http://localhost:3000,{tp},{ok},x\n" for fp, tp, ok in rows)
+        # cùng fingerprint nhưng target khác -> không được tính vào lần quét này
+        + f"{rows[0][0]},http://localhost:8080,0,0,x\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(metrics, "GROUND_TRUTH", csv_path)
@@ -394,14 +450,14 @@ def test_metrics_ignores_unlabelled_rows(monkeypatch, tmp_path):
     from eval import metrics
     csv_path = tmp_path / "gt.csv"
     csv_path.write_text(
-        "fingerprint,is_true_positive,patch_ok,name\n"
-        "aaa,1,,x\n"
-        "bbb,,,x\n"        # chưa gán -> phải bị bỏ qua
-        "ccc,khong-hop-le,,x\n",
+        "fingerprint,target,is_true_positive,patch_ok,name\n"
+        "aaa,http://t,1,,x\n"
+        "bbb,http://t,,,x\n"        # chưa gán -> phải bị bỏ qua
+        "ccc,http://t,khong-hop-le,,x\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(metrics, "GROUND_TRUTH", csv_path)
-    assert set(metrics.load_labels()) == {"aaa"}
+    assert set(metrics.load_labels()) == {("aaa", "http://t")}
 
 
 def test_export_preserves_existing_labels(monkeypatch, tmp_path):
@@ -413,8 +469,9 @@ def test_export_preserves_existing_labels(monkeypatch, tmp_path):
 
     export.main(scan_id)
     text = out.read_text(encoding="utf-8-sig")
-    text = text.replace(f"{findings[0].fingerprint},zap,High,Critical,Thấp,A,,,,",
-                        f"{findings[0].fingerprint},zap,High,Critical,Thấp,A,1,1,ghi chú,an")
+    t = "http://localhost:3000"
+    text = text.replace(f"{findings[0].fingerprint},{t},zap,High,Critical,Thấp,A,,,,",
+                        f"{findings[0].fingerprint},{t},zap,High,Critical,Thấp,A,1,1,ghi chú,an")
     out.write_text(text, encoding="utf-8-sig")
 
     export.main(scan_id)  # chạy lại

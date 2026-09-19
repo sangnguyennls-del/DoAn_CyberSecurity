@@ -26,7 +26,9 @@ from pathlib import Path
 from core import db
 
 OUT = Path(__file__).parent / "ground_truth.csv"
-COLUMNS = ["fingerprint", "source", "severity_scanner", "severity_ai",
+# `target` nằm trong khoá: cùng một lỗ hổng trên nginx và trên Flask có bản vá khác
+# nhau, nên patch_ok (thậm chí is_true_positive) phải gán riêng cho từng target.
+COLUMNS = ["fingerprint", "target", "source", "severity_scanner", "severity_ai",
            "fp_risk_ai", "name", "is_true_positive", "patch_ok", "note", "labeled_by"]
 
 
@@ -35,20 +37,22 @@ def main(scan_id: int) -> int:
     findings = db.get_findings(conn, scan_id)
     if not findings:
         sys.exit(f"Lần quét #{scan_id} không có phát hiện nào.")
-    analyses = db.get_cached(conn, [f.fingerprint for f in findings])
+    target = db.get_scan(conn, scan_id)["target"]
+    analyses = db.get_cached(conn, [f.fingerprint for f in findings], target)
 
     # Giữ nhãn đã gán từ lần trước - không được ghi đè công sức của người gán
-    existing: dict[str, dict] = {}
+    existing: dict[tuple[str, str], dict] = {}
     if OUT.exists():
         with OUT.open(encoding="utf-8-sig", newline="") as f:
-            existing = {r["fingerprint"]: r for r in csv.DictReader(f)}
+            existing = {(r["fingerprint"], r.get("target", "")): r for r in csv.DictReader(f)}
 
     rows = []
     for f in sorted(findings, key=lambda x: x.sort_key()):
         ai = analyses.get(f.fingerprint, {})
-        old = existing.get(f.fingerprint, {})
+        old = existing.get((f.fingerprint, target), {})
         rows.append({
             "fingerprint": f.fingerprint,
+            "target": target,
             "source": f.source,
             "severity_scanner": f.severity,
             "severity_ai": ai.get("severity_ai", ""),
@@ -61,10 +65,10 @@ def main(scan_id: int) -> int:
         })
 
     # Giữ cả nhãn của các lần quét khác đã gán trước đó
-    seen = {r["fingerprint"] for r in rows}
+    seen = {(r["fingerprint"], r["target"]) for r in rows}
     rows += [
         {c: old.get(c, "") for c in COLUMNS}
-        for fp, old in existing.items() if fp not in seen
+        for key, old in existing.items() if key not in seen
     ]
 
     # utf-8-sig để Excel trên Windows mở ra không bị vỡ tiếng Việt

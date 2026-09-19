@@ -158,8 +158,14 @@ api/ (dashboard)─┴─> cùng một bộ hàm bên dưới, cùng một datab
 
 1. gom trùng trong một lần quét
 2. so sánh giữa hai lần quét — diff chỉ là phép toán tập hợp
-3. khoá cache kết quả AI — quét lại target cũ gần như miễn phí
-4. khoá join với bảng ground truth khi đánh giá độ chính xác
+3. khoá cache kết quả AI, **ghép với target** — quét lại target cũ gần như miễn phí
+4. khoá join với ground truth, **ghép với target**
+
+Hai việc sau từng dùng fingerprint trơn và đó là lỗi đo được: cache dùng chung giữa các
+target, nên vulnapp (Flask) được phục vụ bản vá nginx sinh cho target `:8080`, và báo cáo
+khuyên `server_tokens off` cho một app không có nginx. Cùng một lỗ hổng nhưng bản vá phụ
+thuộc ngăn xếp, nên khoá cache giờ là `(fingerprint, model, target)`. Dòng cache cũ không
+rõ target được giữ lại với `target=''` và không bao giờ được dùng.
 
 **URL cố ý không nằm trong khoá.** Đo thật trên Juice Shop: test "backup/cert file found"
 của Nikto khớp **140 URL khác nhau**. Nếu tính cả đường dẫn thì thành 140 lỗ hổng riêng biệt,
@@ -175,10 +181,17 @@ khác hẳn nhau: `CSP: Failure to Define Directive with No Fallback` và
 theo pluginid, trang so sánh sẽ báo "không có gì thay đổi" trong khi vấn đề đã đổi hẳn —
 tức là **bằng chứng "đã vá" của đồ án trở thành sai**. Có test hồi quy canh việc này.
 
+**Với Nikto, khoá có thêm phần nằm trong dấu nháy đơn.** Nikto dùng chung một id cho mọi
+header lạ, nên `'x-recruiting'` (đã vá) và một header mới xuất hiện từng gộp làm một, và
+trang so sánh báo "còn tồn tại" cho thứ đã vá xong. Tên header, entry robots.txt nằm trong
+nháy; URL thì không, nên không làm bung lại ca 140 URL ở trên.
+
 ## Vì sao dùng Claude
 
-Dùng `messages.parse(output_format=ReportOut)` — **API bảo đảm đầu ra đúng schema**, không
-cần validate hay thử lại ở phía mình.
+Dùng `messages.stream(..., output_format=ReportOut)` — **API bảo đảm đầu ra đúng schema**,
+không cần validate hay thử lại ở phía mình. Phải stream vì `max_tokens` lớn: SDK từ chối
+gọi không-stream ở mức này. Findings được chia lô 6 cái một lần gọi, lô nào xong ghi cache
+ngay, để một lô hỏng không làm mất tiền của các lô trước.
 
 Đây là lý do chọn, chứ không phải tiện tay: đầu ra của mô hình **chính là dữ liệu đầu vào**
 cho phần đánh giá định lượng ở `eval/`. Nếu vài phân tích rơi vì JSON hỏng thì precision và
@@ -190,8 +203,10 @@ Claude cũng có `stop_reason == "refusal"` riêng, nên phân biệt được "
 "lỗi kỹ thuật". Với đồ án mà đầu vào là dữ liệu lỗ hổng, số lần bị từ chối là một số liệu
 đáng ghi vào báo cáo, không phải một bug cần giấu.
 
-Chi phí không phải yếu tố quyết định ở quy mô này: đo trên dữ liệu thật, 18 lỗ hổng ≈ 4.500
-token vào ≈ **4.000đ mỗi lần quét mới**, và quét lại target cũ gần như miễn phí nhờ cache.
+Chi phí đo trên dữ liệu thật (lần quét #9, 22 lỗ hổng): 18.437 token vào / 47.293 token ra,
+khoảng **33.500đ**, tức chừng 1.500đ mỗi lỗ hổng. Phần lớn là token *ra*, vì mỗi lỗ hổng
+kèm giải thích và đoạn mã vá. Quét lại cùng target chỉ trả tiền cho lỗ hổng mới xuất hiện:
+lần quét lại #17 sau khi vá nginx chỉ gọi API cho 3/16 lỗ hổng.
 
 ## Ghi chú kỹ thuật (đã xử lý sẵn, đừng "sửa lại")
 

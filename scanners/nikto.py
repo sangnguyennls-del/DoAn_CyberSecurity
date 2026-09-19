@@ -26,6 +26,10 @@ def docker_args(container_url: str, host_outdir: str, maxtime: int = 300) -> lis
 
 
 _QUOTED = re.compile(r"'([^']{1,60})'")
+# "Suggested security header missing: content-security-policy." - tên header KHÔNG
+# nằm trong nháy. Đo ở lần quét #18 -> #19: 5 header thiếu gộp làm một, vá 4 cái
+# mà bảng so sánh vẫn báo "còn tồn tại", và finding về HSTS hiện bản vá AI viết cho CSP.
+_MISSING_HEADER = re.compile(r"header missing: ([\w-]{1,60})", re.I)
 
 
 def _key(test_id: str, msg: str) -> str:
@@ -41,7 +45,7 @@ def _key(test_id: str, msg: str) -> str:
     đều được Nikto đặt trong nháy; còn URL thì KHÔNG, nên chỗ này không làm bung
     trở lại lỗi cũ (một phát hiện khớp 140 URL thành 140 dòng).
     """
-    return "|".join([test_id, *_QUOTED.findall(msg)])
+    return "|".join([test_id, *_QUOTED.findall(msg), *_MISSING_HEADER.findall(msg)])
 
 
 def parse(data) -> list[Finding]:

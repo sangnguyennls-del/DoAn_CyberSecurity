@@ -1,27 +1,31 @@
-"""Ứng dụng Flask CỐ Ý CÓ LỖ HỔNG - target lab để vá ở tầng CODE.
+"""Ứng dụng Flask lab - target để vá ở tầng CODE.
 
     python lab/vulnapp/app.py     ->  http://127.0.0.1:5000
 
 Juice Shop không sửa được (code của người khác), nên nó chỉ chứng minh được AI vá
-được CẤU HÌNH. File này là target thứ hai: bốn lỗ hổng nằm ngay trong code, vá được
-bằng vài dòng, để chứng minh AI vá được cả CODE.
+được CẤU HÌNH. File này là target thứ hai: lỗ hổng nằm ngay trong code.
 
 CẢNH BÁO: Chỉ chạy trên máy cá nhân. Đã bind vào 127.0.0.1 nên máy khác trong mạng
 không truy cập được - đừng đổi thành 0.0.0.0.
 
-Quy trình dùng file này:
-  1. python lab/vulnapp/app.py
-  2. python scan.py http://localhost:5000
-  3. Đọc bản vá AI đề xuất trong báo cáo
-  4. Sửa theo, đánh dấu lại bằng "ĐÃ VÁ"
-  5. Quét lại rồi so sánh hai lần quét
+TRẠNG THÁI: bản ĐÃ VÁ theo `fix_snippet` Claude sinh ra cho lần quét #18.
+Bản chưa vá (4 lỗ hổng cố ý) giữ ở app.py.chuava.bak. Tên finding sinh ra mỗi
+thay đổi ghi ngay trong comment [..] bên cạnh. Chỗ nào nhóm phải chỉnh cho khớp
+app thật thì ghi "CHỈNH:" - xem lab/KETQUA_VONG_LAP.md.
 """
 
+import secrets
 import sqlite3
 
-from flask import Flask, Response, request
+# CHỈNH: snippet CSP của AI import thêm `escape` từ flask -> ImportError trên
+# Flask 3.1.3 (đã bị gỡ từ 3.0). Snippet không dùng tới nó nên chỉ việc bỏ đi.
+from flask import Flask, abort, g, render_template, request
+from werkzeug.serving import WSGIRequestHandler
 
 app = Flask(__name__)
+# [Cross Site Scripting (Reflected)] - hardening cookie đi kèm
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
+
 DB = ":memory:"
 _conn = sqlite3.connect(DB, check_same_thread=False)
 _conn.executescript("""
@@ -32,68 +36,92 @@ INSERT INTO users (username, email, role) VALUES
   ('admin','admin@lab.local','admin');
 """)
 
-PAGE = """<!doctype html><html lang="vi"><head><meta charset="utf-8">
-<title>Lab App - co lo hong</title>
-<style>body{{font:15px system-ui;margin:40px;max-width:680px}}
-input{{padding:6px}} .box{{background:#f1f5f9;padding:12px;border-radius:6px}}</style>
-</head><body>
-<h1>Ứng dụng lab (cố ý có lỗ hổng)</h1>
-<p>Target để thử bản vá do AI đề xuất. Chỉ chạy trên máy cá nhân.</p>
-<form action="/search"><label>Tìm user: <input name="q" value=""></label>
-<button>Tìm</button></form>
-<form action="/greet"><label>Tên bạn: <input name="name" value=""></label>
-<button>Chào</button></form>
-<div class="box">{body}</div>
-</body></html>"""
 
-
-@app.route("/")
+# [OPTIONS: Allowed HTTP Methods] - tắt OPTIONS tự động ở route "/"
+@app.route("/", methods=["GET"], provide_automatic_options=False)
 def index():
-    return PAGE.format(body="Nhập gì đó vào một trong hai ô ở trên.")
+    return render_template("page.html", message="Nhập gì đó vào một trong hai ô ở trên.")
 
 
 @app.route("/search")
 def search():
-    q = request.args.get("q", "")
-    # LỖ HỔNG 1 - SQL Injection (CWE-89):
-    # Ghép chuỗi thẳng vào câu truy vấn. Thử: /search?q=' OR '1'='1
-    # Vá: dùng truy vấn tham số hoá -> "WHERE username LIKE ?" với (f"%{q}%",)
-    sql = f"SELECT username, email, role FROM users WHERE username LIKE '%{q}%'"
+    # [SQL Injection] - truy vấn tham số hoá, giới hạn độ dài input
+    # CHỈNH: AI không thấy mã nguồn nên đoán bảng `items(id, name, description)` và
+    # template search.html; đổi sang bảng/cột thật của app này, giữ nguyên cách vá.
+    q = (request.args.get("q") or "").strip()
+    if len(q) > 100:
+        abort(400)
     try:
-        rows = _conn.execute(sql).fetchall()
-    except sqlite3.Error as e:
-        # LỖ HỔNG 2 - Lộ thông tin qua thông báo lỗi (CWE-209):
-        # Trả câu SQL và lỗi gốc về cho người dùng -> giúp kẻ tấn công dò cấu trúc DB.
-        # Vá: log lỗi ra server, trả về cho người dùng một câu chung chung.
-        return PAGE.format(body=f"Lỗi SQL: {e}<br>Câu truy vấn: {sql}"), 500
-
-    body = "<br>".join(f"{r[0]} - {r[1]} ({r[2]})" for r in rows) or "Không tìm thấy."
-    return PAGE.format(body=body)
+        rows = _conn.execute(
+            "SELECT username, email, role FROM users WHERE username LIKE ?",
+            (f"%{q}%",),
+        ).fetchall()
+    except sqlite3.Error:
+        # [SQL Injection] - log lỗi ra server, không trả chi tiết cho người dùng
+        app.logger.exception("DB error on /search")
+        abort(500)
+    # [SQL Injection] - render_template (autoescape) thay vì nối chuỗi HTML
+    return render_template("page.html", rows=rows)
 
 
 @app.route("/greet")
 def greet():
-    name = request.args.get("name", "khách")
-    # LỖ HỔNG 3 - Reflected XSS (CWE-79):
-    # Nhúng thẳng dữ liệu người dùng vào HTML. Thử: /greet?name=<script>alert(1)</script>
-    # Vá: escape trước khi nhúng -> html.escape(name), hoặc dùng template Jinja2
-    #      (Jinja2 tự escape), tuyệt đối không nối chuỗi HTML bằng tay.
-    return PAGE.format(body=f"Xin chào, {name}!")
+    # [Cross Site Scripting (Reflected)] - giới hạn độ dài, để Jinja2 tự escape
+    # CHỈNH: AI đề xuất templates/greet.html; app này dùng chung page.html.
+    name = (request.args.get("name") or "khách")[:80]
+    return render_template("page.html", message=f"Xin chào, {name}!")
+
+
+# [Content Security Policy (CSP) Header Not Set] - nonce cho script nội tuyến
+@app.before_request
+def gen_csp_nonce():
+    g.csp_nonce = secrets.token_urlsafe(16)
 
 
 @app.after_request
-def add_headers(resp: Response) -> Response:
-    # LỖ HỔNG 4 - Thiếu security header (CWE-693):
-    # Không có Content-Security-Policy, X-Content-Type-Options, X-Frame-Options,
-    # Referrer-Policy. Đây chính là nhóm lỗi mà ZAP báo nhiều nhất.
-    # Vá: thêm các header vào đây, ví dụ
-    #     resp.headers["Content-Security-Policy"] = "default-src 'self'"
-    #     resp.headers["X-Content-Type-Options"] = "nosniff"
-    #     resp.headers["X-Frame-Options"] = "DENY"
-    #     resp.headers["Referrer-Policy"] = "no-referrer"
+def set_security_headers(resp):
+    # [Content Security Policy (CSP) Header Not Set]
+    resp.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        f"script-src 'self' 'nonce-{g.csp_nonce}'; "
+        "style-src 'self'; "
+        "img-src 'self' data:; "
+        "font-src 'self'; "
+        "connect-src 'self'; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'; "
+        "frame-ancestors 'none'"
+    )
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # [Missing Anti-clickjacking Header]
+    resp.headers["X-Frame-Options"] = "DENY"
+    # [Permissions Policy Header Not Set]
+    resp.headers.setdefault(
+        "Permissions-Policy",
+        "geolocation=(), camera=(), microphone=(), payment=(), usb=()",
+    )
+    # [Cross-Origin-Opener-Policy Header Missing or Invalid]
+    resp.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    # [Cross-Origin-Embedder-Policy Header Missing or Invalid]
+    resp.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+    # [Cross-Origin-Resource-Policy Header Missing or Invalid]
+    resp.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+    # [Storable and Cacheable Content] - trang động: cấm lưu trữ
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
     return resp
+
+
+# [Server Leaks Version Information via "Server" HTTP Response Header Field]
+# Cách 1 của AI: lab vẫn dùng dev server, chỉ bỏ chuỗi phiên bản.
+class QuietHandler(WSGIRequestHandler):
+    def version_string(self):
+        return ""
 
 
 if __name__ == "__main__":
     # 127.0.0.1: chỉ máy này truy cập được. debug=False: không lộ Werkzeug debugger.
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    app.run(host="127.0.0.1", port=5000, debug=False, request_handler=QuietHandler)

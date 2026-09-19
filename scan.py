@@ -139,7 +139,7 @@ def cmd_analyze(args) -> int:
         print(f"Lần quét #{args.analyze} không có phát hiện nào.", file=sys.stderr)
         return 2
 
-    done = len(db.get_cached(conn, [f.fingerprint for f in findings]))
+    done = len(db.get_cached(conn, [f.fingerprint for f in findings], scan["target"]))
     print(f"Lần quét #{args.analyze} -> {scan['target']}")
     print(f"{len(findings)} lỗ hổng, {done} đã có phân tích, {len(findings) - done} cần gọi API.\n")
 

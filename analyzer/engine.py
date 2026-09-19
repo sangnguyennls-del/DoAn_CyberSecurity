@@ -216,7 +216,7 @@ def analyze(
 
     cached: dict[str, dict] = {}
     if conn is not None:
-        cached = db_mod.get_cached(conn, [f.fingerprint for f in findings], model)
+        cached = db_mod.get_cached(conn, [f.fingerprint for f in findings], target, model)
     todo = [f for f in findings if f.fingerprint not in cached]
 
     if not todo:
@@ -262,7 +262,7 @@ def analyze(
         # Chỉ nhận fingerprint khớp đầu vào - bỏ qua cái AI bịa thêm
         got = [a.model_dump() for a in out.analyses if a.fingerprint in known]
         if conn is not None and got:
-            db_mod.put_cached(conn, model, got)   # ghi ngay, không đợi hết vòng
+            db_mod.put_cached(conn, model, target, got)   # ghi ngay, không đợi hết vòng
         fresh.update({a["fingerprint"]: a for a in got})
         say(f"  [ok] Lô {i}/{len(batches)}: {len(got)}/{len(batch)} phân tích "
             f"({ti:,} vào / {to:,} ra)")

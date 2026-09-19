@@ -37,18 +37,18 @@ GROUND_TRUTH = Path(__file__).parent / "ground_truth.csv"
 FP_PREDICT_POSITIVE = {"cao"}  # AI coi là false positive khi rủi ro FP = "Cao"
 
 
-def load_labels() -> dict[str, dict]:
+def load_labels() -> dict[tuple[str, str], dict]:
     """Nạp nhãn thủ công. Bỏ qua dòng chưa gán (cột để trống)."""
     if not GROUND_TRUTH.exists():
         sys.exit(f"Chưa có {GROUND_TRUTH}. Chạy `python -m eval.export <scan_id>` trước.")
 
-    out: dict[str, dict] = {}
+    out: dict[tuple[str, str], dict] = {}
     with GROUND_TRUTH.open(encoding="utf-8-sig", newline="") as f:
         for row in csv.DictReader(f):
             tp = (row.get("is_true_positive") or "").strip()
             if tp not in ("0", "1"):
                 continue  # chưa gán nhãn
-            out[row["fingerprint"]] = {
+            out[(row["fingerprint"], row.get("target", ""))] = {
                 "is_true_positive": int(tp),
                 "patch_ok": (row.get("patch_ok") or "").strip(),
                 "name": row.get("name", ""),
@@ -89,7 +89,8 @@ def confusion(pairs: list[tuple[dict, dict]]) -> tuple[int, int, int, int]:
 def main(scan_id: int) -> int:
     conn = db.connect()
     findings = db.get_findings(conn, scan_id)
-    analyses = db.get_cached(conn, [f.fingerprint for f in findings])
+    target = db.get_scan(conn, scan_id)["target"]
+    analyses = db.get_cached(conn, [f.fingerprint for f in findings], target)
     labels = load_labels()
 
     if not analyses:
@@ -97,9 +98,9 @@ def main(scan_id: int) -> int:
 
     # Chỉ tính trên phần vừa có nhãn thật vừa có dự đoán của AI
     pairs = [
-        (labels[f.fingerprint], analyses[f.fingerprint], f)
+        (labels[(f.fingerprint, target)], analyses[f.fingerprint], f)
         for f in findings
-        if f.fingerprint in labels and f.fingerprint in analyses
+        if (f.fingerprint, target) in labels and f.fingerprint in analyses
     ]
     if not pairs:
         sys.exit("Không có phát hiện nào vừa được gán nhãn vừa có phân tích AI.")

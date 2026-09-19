@@ -38,8 +38,8 @@ def _scan_context(conn, scan_id: int) -> dict:
     """
     findings = db.get_findings(conn, scan_id)
     summary, priority, warnings = db.get_summary(conn, scan_id)
-    analyses = db.get_cached(conn, [f.fingerprint for f in findings])
     row = db.get_scan(conn, scan_id)
+    analyses = db.get_cached(conn, [f.fingerprint for f in findings], row["target"])
     return report.context(
         findings=findings,
         analyses=analyses,

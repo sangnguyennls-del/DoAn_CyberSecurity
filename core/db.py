@@ -1,8 +1,9 @@
 """HỢP ĐỒNG 2 — lưu trữ SQLite. Dùng sqlite3 stdlib, không ORM (4 bảng thì ORM chỉ thêm việc).
 
-Điểm thiết kế: bảng `analyses` khoá theo fingerprint chứ KHÔNG theo scan_id.
+Điểm thiết kế: bảng `analyses` khoá theo (fingerprint, target) chứ KHÔNG theo scan_id.
 Quét lại target cũ -> finding không đổi được lấy từ cache, không tốn tiền API.
-Đây chính là thứ làm vòng lặp vá->quét lại chạy nhanh và rẻ.
+Đây chính là thứ làm vòng lặp vá->quét lại chạy nhanh và rẻ. Không dùng chung giữa
+các target, vì cùng một lỗ hổng nhưng bản vá cho nginx và cho Flask khác nhau.
 """
 
 from __future__ import annotations
@@ -45,16 +46,20 @@ CREATE TABLE IF NOT EXISTS findings (
 CREATE INDEX IF NOT EXISTS idx_findings_scan ON findings(scan_id);
 CREATE INDEX IF NOT EXISTS idx_findings_fp   ON findings(fingerprint);
 
--- Cache kết quả AI, dùng chung cho MỌI lần quét.
+-- Cache kết quả AI, dùng chung cho mọi lần quét CÙNG MỘT TARGET.
 -- Khoá gồm cả `model`: đổi sang bản Claude mới thì phân tích lại, thay vì lặng lẽ
 -- dùng lại kết quả của model cũ rồi gán nhãn model mới - số liệu trong eval/ phải
 -- nói đúng model nào sinh ra nó.
+-- Khoá gồm cả `target`: bản vá phụ thuộc ngăn xếp của target. Cùng lỗi "thiếu CSP"
+-- nhưng nginx vá bằng add_header, Flask vá trong after_request. Thiếu cột này thì
+-- vulnapp từng được phục vụ bản vá nginx lấy từ cache của target khác.
 CREATE TABLE IF NOT EXISTS analyses (
     fingerprint  TEXT NOT NULL,
     model        TEXT NOT NULL,
+    target       TEXT NOT NULL DEFAULT '',
     created_at   TEXT NOT NULL,
     json         TEXT NOT NULL,
-    PRIMARY KEY (fingerprint, model)
+    PRIMARY KEY (fingerprint, model, target)
 );
 
 -- Ground truth gán nhãn thủ công (TV5)
@@ -90,21 +95,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
         if col not in cols:
             conn.execute(f"ALTER TABLE scans ADD COLUMN {col} TEXT")
 
-    # analyses: khoá cũ chỉ có fingerprint. SQLite không đổi được primary key,
-    # phải dựng lại bảng. Giữ nguyên dữ liệu cũ vì đó là tiền API đã trả.
+    # analyses: khoá cũ không có target. SQLite không đổi được primary key, phải
+    # dựng lại bảng. Giữ dữ liệu cũ vì đó là tiền API đã trả, nhưng gán target=''
+    # (không rõ) chứ KHÔNG đoán: quy tắc đoán tự nhiên nhất ("lần quét gần nhất có
+    # fingerprint đó") đo trên DB thật gán sai 18/33 dòng. get_cached không bao giờ
+    # phục vụ dòng target=''; muốn dùng lại thì gán target bằng tay khi biết chắc.
     info = list(conn.execute("PRAGMA table_info(analyses)"))
-    if info and {r["name"] for r in info if r["pk"]} == {"fingerprint"}:
+    if info and "target" not in {r["name"] for r in info}:
+        conn.execute("ALTER TABLE analyses RENAME TO analyses_old")
+        conn.executescript(SCHEMA)  # mọi bảng khác đã có -> chỉ tạo lại analyses
         conn.executescript("""
-            ALTER TABLE analyses RENAME TO analyses_old;
-            CREATE TABLE analyses (
-                fingerprint  TEXT NOT NULL,
-                model        TEXT NOT NULL,
-                created_at   TEXT NOT NULL,
-                json         TEXT NOT NULL,
-                PRIMARY KEY (fingerprint, model)
-            );
-            INSERT OR IGNORE INTO analyses (fingerprint, model, created_at, json)
-                SELECT fingerprint, model, created_at, json FROM analyses_old;
+            INSERT OR IGNORE INTO analyses (fingerprint, model, target, created_at, json)
+                SELECT fingerprint, model, '', created_at, json FROM analyses_old;
             DROP TABLE analyses_old;
         """)
     conn.commit()
@@ -208,18 +210,21 @@ def compare_scans(conn: sqlite3.Connection, scan_a: int, scan_b: int) -> dict[st
 
 # -------------------------------------------------------- cache phân tích
 
-def get_cached(conn: sqlite3.Connection, fingerprints: list[str],
+def get_cached(conn: sqlite3.Connection, fingerprints: list[str], target: str,
                model: str | None = None) -> dict[str, dict]:
-    """Kết quả phân tích đã lưu, theo fingerprint.
+    """Kết quả phân tích đã lưu cho `target`, theo fingerprint.
 
     Khoá gồm cả model nên đổi MODEL (ví dụ sang bản Claude mới) sẽ phân tích lại
     thay vì lặng lẽ dùng lại kết quả của model cũ rồi gán nhãn model mới.
+
+    target='' là dòng cũ không rõ sinh cho target nào -> không bao giờ trả về.
+    Chặn ở đây vì mọi đường đọc cache đều đi qua hàm này.
     """
-    if not fingerprints:
+    if not fingerprints or not target:
         return {}
     qs = ",".join("?" * len(fingerprints))
-    sql = f"SELECT fingerprint, json FROM analyses WHERE fingerprint IN ({qs})"
-    params = list(fingerprints)
+    sql = f"SELECT fingerprint, json FROM analyses WHERE target = ? AND fingerprint IN ({qs})"
+    params = [target, *fingerprints]
     if model:
         sql += " AND model = ?"
         params.append(model)
@@ -228,9 +233,11 @@ def get_cached(conn: sqlite3.Connection, fingerprints: list[str],
     return {r["fingerprint"]: json.loads(r["json"]) for r in conn.execute(sql, params)}
 
 
-def put_cached(conn: sqlite3.Connection, model: str, analyses: list[dict]) -> None:
+def put_cached(conn: sqlite3.Connection, model: str, target: str, analyses: list[dict]) -> None:
     conn.executemany(
-        "INSERT OR REPLACE INTO analyses (fingerprint, model, created_at, json) VALUES (?,?,?,?)",
-        [(a["fingerprint"], model, _now(), json.dumps(a, ensure_ascii=False)) for a in analyses],
+        "INSERT OR REPLACE INTO analyses (fingerprint, model, target, created_at, json) "
+        "VALUES (?,?,?,?,?)",
+        [(a["fingerprint"], model, target, _now(), json.dumps(a, ensure_ascii=False))
+         for a in analyses],
     )
     conn.commit()

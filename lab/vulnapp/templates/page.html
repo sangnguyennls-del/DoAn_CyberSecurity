@@ -1,0 +1,19 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8">
+<title>Lab App - da va</title>
+<style>body{font:15px system-ui;margin:40px;max-width:680px}
+input{padding:6px} .box{background:#f1f5f9;padding:12px;border-radius:6px}</style>
+</head><body>
+<h1>Ứng dụng lab (đã vá theo đề xuất AI)</h1>
+<p>Target để thử bản vá do AI đề xuất. Chỉ chạy trên máy cá nhân.</p>
+<form action="/search"><label>Tìm user: <input name="q" value=""></label>
+<button>Tìm</button></form>
+<form action="/greet"><label>Tên bạn: <input name="name" value=""></label>
+<button>Chào</button></form>
+<div class="box">
+{%- if rows is defined -%}
+  {%- for r in rows %}{{ r[0] }} - {{ r[1] }} ({{ r[2] }})<br>{% else %}Không tìm thấy.{% endfor -%}
+{%- else -%}
+  {{ message }}
+{%- endif -%}
+</div>
+</body></html>
