@@ -88,6 +88,35 @@ def test_one_nikto_test_across_many_urls_collapses_to_one_finding():
     assert len(merged[0].urls) == 5, "chỉ giữ 5 URL mẫu cho báo cáo đọc được"
 
 
+def test_two_different_uncommon_headers_stay_separate():
+    """Hồi quy cho ca đo được giữa lần quét #9 và #17.
+
+    Nikto dùng chung một id cho MỌI header lạ. Sau khi vá, 'x-recruiting' đã
+    bị gỡ và một header khác xuất hiện, nhưng hai cái gộp chung fingerprint nên
+    bảng so sánh báo "còn tồn tại" cho một thứ đã vá xong. Trang so sánh là bằng
+    chứng chính của đồ án, nó không được phép nói sai.
+    """
+    data = {"vulnerabilities": [
+        {"id": "999966", "method": "GET", "url": "/",
+         "msg": "Uncommon header(s) 'x-recruiting' found, with contents: /#/jobs."},
+        {"id": "999966", "method": "GET", "url": "/",
+         "msg": "Uncommon header(s) 'cross-origin-embedder-policy-report-only' found."},
+    ]}
+    merged = dedupe(nikto.parse(data))
+    assert len(merged) == 2, "hai header khác nhau là hai vấn đề khác nhau"
+
+
+def test_same_uncommon_header_still_collapses():
+    """Mặt còn lại: cùng một header trên nhiều URL vẫn phải gom về một."""
+    data = {"vulnerabilities": [
+        {"id": "999966", "method": "GET", "url": f"/trang{i}",
+         "msg": "Uncommon header(s) 'x-recruiting' found, with contents: /#/jobs."}
+        for i in range(12)
+    ]}
+    merged = dedupe(nikto.parse(data))
+    assert len(merged) == 1 and merged[0].count == 12
+
+
 # ----------------------------------------------------------------- dedupe
 
 def mk(key: str, url: str = "/", sev: str = "Info", count: int = 1) -> Finding:

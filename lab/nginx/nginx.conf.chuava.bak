@@ -1,0 +1,43 @@
+# Reverse proxy đặt trước Juice Shop - target lab để vá ở tầng CẤU HÌNH.
+#
+# Juice Shop là code của người khác, không sửa được. Nhưng phần lớn phát hiện của
+# ZAP/Nikto là lỗi CẤU HÌNH (thiếu header, lộ banner, cookie không có cờ) - và
+# những thứ đó vá được ngay tại đây.
+#
+# Chạy:
+#   docker run --rm -d --name lab-nginx -p 8080:80 \
+#     -v "<đường dẫn tuyệt đối>/lab/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+#     nginx:alpine
+#
+# Rồi quét http://localhost:8080 thay vì http://localhost:3000.
+#
+# TRẠNG THÁI: bản CHƯA VÁ. Cố ý không có security header nào.
+# Sau khi đọc bản vá AI đề xuất, thêm vào khối server rồi:
+#   docker restart lab-nginx
+#   python scan.py http://localhost:8080
+# và so sánh hai lần quét.
+
+server {
+    listen 80;
+    server_name localhost;
+
+    # Lộ phiên bản nginx trong header Server -> Nikto sẽ báo.
+    # Vá: server_tokens off;
+
+    # CHƯA CÓ security header nào. ZAP sẽ báo thiếu:
+    #   Content-Security-Policy, X-Content-Type-Options, X-Frame-Options,
+    #   Referrer-Policy, Permissions-Policy, Strict-Transport-Security
+    # Chỗ để dán bản vá AI đề xuất:
+    # >>> BẮT ĐẦU BẢN VÁ <<<
+
+    # >>> KẾT THÚC BẢN VÁ <<<
+
+    location / {
+        proxy_pass http://host.docker.internal:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}

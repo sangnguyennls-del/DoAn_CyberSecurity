@@ -120,6 +120,35 @@ def cmd_list(_args) -> int:
     return 0
 
 
+def cmd_analyze(args) -> int:
+    """Phân tích AI cho một lần quét ĐÃ LƯU, không chạy lại scanner.
+
+    Cần cho bước gán nhãn: muốn đo precision/recall thì mỗi finding phải có
+    `false_positive_risk` của AI để đối chiếu với nhãn tay. Quét lại chỉ để lấy
+    phân tích thì vừa lâu vừa ra tập finding khác (mục tiêu đã đổi trạng thái),
+    làm hỏng việc so sánh.
+    """
+    conn = db.connect()
+    scan = db.get_scan(conn, args.analyze)
+    if scan is None:
+        print(f"Không có lần quét #{args.analyze}.", file=sys.stderr)
+        return 2
+
+    findings = db.get_findings(conn, args.analyze)
+    if not findings:
+        print(f"Lần quét #{args.analyze} không có phát hiện nào.", file=sys.stderr)
+        return 2
+
+    done = len(db.get_cached(conn, [f.fingerprint for f in findings]))
+    print(f"Lần quét #{args.analyze} -> {scan['target']}")
+    print(f"{len(findings)} lỗ hổng, {done} đã có phân tích, {len(findings) - done} cần gọi API.\n")
+
+    result = analyze(findings, conn=conn, target=scan["target"], progress=_say)
+    db.save_summary(conn, args.analyze, result["summary"], result["priority"], result["warnings"])
+    print(f"\nXong. Xuất phiếu gán nhãn: python -m eval.export {args.analyze}")
+    return 0
+
+
 def cmd_compare(args) -> int:
     """Trước/sau khi vá. Đây là phần chứng minh bản vá AI đề xuất có tác dụng thật."""
     conn = db.connect()
@@ -157,12 +186,16 @@ def main() -> int:
     p.add_argument("--list", action="store_true", help="Liệt kê các lần quét đã lưu")
     p.add_argument("--compare", nargs=2, type=int, metavar=("A", "B"),
                    help="So sánh hai lần quét (A = trước khi vá, B = sau khi vá)")
+    p.add_argument("--analyze", type=int, metavar="ID",
+                   help="Chạy phân tích AI cho một lần quét đã lưu, không quét lại")
     args = p.parse_args()
 
     if args.list:
         return cmd_list(args)
     if args.compare:
         return cmd_compare(args)
+    if args.analyze:
+        return cmd_analyze(args)
     if not args.url:
         p.error("thiếu URL mục tiêu (hoặc dùng --list / --compare)")
     if args.no_nikto and args.no_zap:

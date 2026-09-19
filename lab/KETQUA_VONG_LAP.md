@@ -1,96 +1,117 @@
-# Kết quả vòng lặp vá → quét lại (nginx, tầng cấu hình)
+# Vòng lặp vá → quét lại (tầng cấu hình)
 
-Chạy thật ngày 07/09/2026. Đây là bằng chứng bản vá có tác dụng, và là số liệu đưa
-thẳng vào mục "Kết quả" của báo cáo.
+Mục tiêu: `http://localhost:8080` — nginx reverse proxy đặt trước OWASP Juice Shop.
+Vá ở tầng cấu hình vì Juice Shop là code của người khác, không sửa được.
 
-## Thiết lập
-
-| | |
-|---|---|
-| Target | nginx reverse proxy (cổng 8080) đặt trước OWASP Juice Shop |
-| Scanner | Nikto 2.5.0 + OWASP ZAP baseline, chạy song song qua Docker |
-| Lần quét `#9` — trước khi vá | 164 phát hiện thô → **22 lỗ hổng riêng biệt** |
-| Lần quét `#10` — sau khi vá | **16 lỗ hổng riêng biệt** |
-
-Bản vá: 8 security header + `server_tokens off` + 3 `proxy_hide_header`, dán vào
-`lab/nginx/nginx.conf` giữa hai dòng `>>> BẮT ĐẦU BẢN VÁ <<<`.
-
-## Kết quả
-
-```
-python scan.py --compare 9 10
-```
-
-### Đã vá — 8 lỗ hổng biến mất
-
-| Mức độ | Nguồn | Lỗ hổng | Vá bằng |
-|---|---|---|---|
-| Medium | ZAP | Content Security Policy (CSP) Header Not Set | `add_header Content-Security-Policy` |
-| Medium | ZAP | Cross-Domain Misconfiguration | `proxy_hide_header Access-Control-Allow-Origin` |
-| Low | ZAP | Cross-Origin-Embedder-Policy Header Missing or Invalid | `add_header Cross-Origin-Embedder-Policy` |
-| Low | ZAP | Cross-Origin-Opener-Policy Header Missing or Invalid | `add_header Cross-Origin-Opener-Policy` |
-| Low | ZAP | Deprecated Feature Policy Header Set | `proxy_hide_header Feature-Policy` |
-| Low | ZAP | Server Leaks Version Information via "Server" Header | `server_tokens off` |
-| Info | Nikto | Retrieved access-control-allow-origin header: `*` | `proxy_hide_header` |
-| Info | Nikto | Uncommon header 'x-recruiting' | `proxy_hide_header X-Recruiting` |
-
-### Mới xuất hiện — 2 lỗ hổng
-
-| Mức độ | Nguồn | Lỗ hổng |
+| | Lần quét #9 (trước vá) | Lần quét #17 (sau vá) |
 |---|---|---|
-| Medium | ZAP | CSP: script-src unsafe-inline |
-| Medium | ZAP | CSP: style-src unsafe-inline |
+| Nikto, số lần xuất hiện thô | 152 | 117 |
+| ZAP, số lần xuất hiện thô | 48 | 41 |
+| Tổng thô | 200 | 158 |
+| Sau gom trùng | **22** | **16** |
+| Banner Server | `nginx/1.31.5` | `nginx` |
 
-### Còn tồn tại — 14 lỗ hổng
+(Log lúc chạy in ra "ZAP: 10 phát hiện thô" vì đếm số cảnh báo trong file JSON,
+còn bảng này đếm số lần xuất hiện thực tế sau khi trải các instance của mỗi cảnh
+báo. Hai cách đếm khác nhau, số nào cũng dùng được miễn là nói rõ.)
 
-Chủ yếu là lỗi nằm trong chính Juice Shop (`Dangerous JS Functions`, `/ftp/` truy cập
-được, backup file) — không sửa được từ lớp proxy. Riêng `strict-transport-security`
-còn thiếu là **đúng**: HSTS trên HTTP thuần vô nghĩa, phải có HTTPS trước.
+Bản vá nằm ở `nginx/nginx.conf`, giữa hai mốc `>>> BẮT ĐẦU BẢN VÁ <<<` và
+`>>> KẾT THÚC BẢN VÁ <<<`. Mỗi dòng ghi tên finding đã sinh ra nó. Bản chưa vá
+giữ nguyên ở `nginx/nginx.conf.chuava.bak` để chạy lại từ đầu khi cần demo.
 
-## Phát hiện quan trọng nhất: bản vá đánh đổi, không phải xoá sạch
+## Bản vá này lấy từ đâu
 
-Bản vá làm biến mất 8 lỗ hổng nhưng **sinh ra 2 lỗ hổng mới ở mức Medium**.
+Toàn bộ khối lệnh lấy từ trường `fix_snippet` do Claude sinh ra khi phân tích lần
+quét #9. Không có dòng nào nhóm tự viết thêm. Chỗ duy nhất nhóm can thiệp là gom
+các đoạn rời của nhiều finding vào một khối và bỏ phần trùng nhau.
 
-Nguyên nhân: CSP phải chứa `'unsafe-inline'` cho `script-src` và `style-src` thì Juice
-Shop mới chạy được. Tức là "đã có CSP" không đồng nghĩa với "đã an toàn" — một CSP có
-`unsafe-inline` gần như không chặn được XSS, và ZAP báo đúng.
+Lần chạy đầu tiên mô hình vá sai tầng: nó trả về `helmet` của Express cho một mục
+tiêu chạy nginx, vì prompt để nó tự đoán ngăn xếp. Sửa bằng cách quét banner
+`Server` trên toàn bộ lần quét rồi đưa kết quả vào đầu mỗi lô yêu cầu. Sau khi
+sửa, 4/4 finding sinh lại đều trả về `add_header`/`proxy_hide_header` của nginx.
 
-Ý nghĩa với đồ án — đây là luận điểm trung tâm nên viết vào phần kết luận:
+## Kết quả đo được
 
-> Một bản vá do AI đề xuất **không thể được tin ngay**, kể cả khi nó làm biến mất đúng
-> lỗ hổng mà nó nhắm tới. Bước *quét lại* không phải thủ tục hình thức: nó là thứ duy
-> nhất bắt được lỗ hổng mới do chính bản vá tạo ra. Một quy trình chỉ có
-> "quét → AI đề xuất → áp dụng" mà thiếu bước quét lại sẽ **âm thầm làm hệ thống có
-> thêm lỗ hổng mới** trong khi báo cáo rằng đã vá xong.
->
-> Ở đây bản vá là một **đánh đổi có ý thức**: chấp nhận `unsafe-inline` để ứng dụng
-> chạy được, đổi lấy việc bịt 8 lỗ khác. Đánh đổi đó phải được ghi lại và giải thích,
-> chứ không được giấu đi bằng con số "16 < 22".
+```
+python scan.py --compare 9 17
+```
 
-Đúng đây là lý do vòng lặp này tồn tại trong đồ án, thay vì chỉ dừng ở bước sinh bản vá.
+**Đã vá: 9**
 
-## Một bug phát hiện được nhờ chính vòng lặp này
+| Mức | Nguồn | Lỗ hổng |
+|---|---|---|
+| Medium | zap | Content Security Policy (CSP) Header Not Set |
+| Medium | zap | Cross-Domain Misconfiguration |
+| Low | zap | Cross-Origin-Opener-Policy Header Missing or Invalid |
+| Low | zap | Server Leaks Version Information via "Server" Header |
+| Info | nikto | `/robots.txt`: Entry `/ftp/` trả về mã 200 |
+| Info | nikto | Contains authorization information |
+| Info | zap | Non-Storable Content |
+| Info | nikto | Retrieved access-control-allow-origin header: `*` |
+| Info | nikto | This might be interesting |
 
-Ở lần chạy đầu, `compare` báo "không có gì thay đổi" giữa hai lần quét, trong khi lỗ
-hổng CSP đã đổi từ *Failure to Define Directive with No Fallback* sang *script-src
-unsafe-inline*.
+**Mới xuất hiện: 3 — cả ba đều do chính bản vá gây ra**
 
-Nguyên nhân: fingerprint dùng `pluginid` của ZAP, mà **một plugin phát ra nhiều biến
-thể khác hẳn nhau** — cả hai đều là pluginid `10055`. Gom chung khoá thì hai vấn đề
-khác nhau trở thành một, và **bằng chứng "đã vá" của đồ án thành sai**.
+| Lỗ hổng | Nguyên nhân |
+|---|---|
+| CSP: Wildcard Directive | CSP của AI có `img-src ... https:`, ZAP coi `https:` là wildcard |
+| CSP: style-src unsafe-inline | CSP của AI tự đưa `'unsafe-inline'` vào `style-src` |
+| Cross-Origin-Resource-Policy Header Missing | bật COEP kéo theo yêu cầu CORP, mà dòng CORP trong snippet lại đang bị comment |
 
-Đã sửa: khoá dùng `alertRef` (`10055-1` / `10055-2`) trước, `pluginid` làm dự phòng.
-Số liệu ở trên là kết quả **chạy lại toàn bộ** sau khi sửa, nên trước/sau dùng chung
-một bản khoá.
+**Còn tồn tại: 13**, trong đó 4 ca đáng nói ở mục dưới.
 
-Bài học đáng viết vào báo cáo: công cụ đo cũng phải được kiểm chứng. Nếu chỉ chạy một
-lần rồi tin luôn con số, nhóm đã báo cáo một kết quả sai mà không hề biết.
+## Bản vá của AI sai ở đâu
 
-## Lưu ý về tính tái lập
+Bốn lỗi đo được bằng `curl -D -` sau khi áp bản vá, không phải nhận định cảm tính.
 
-Bản vá dùng ở trên do nhóm tự viết (lúc chạy thử chưa có API key). Khi demo thật, bản
-vá phải lấy từ cột "Phân tích & bản vá" trong báo cáo do AI sinh — và cần lưu lại
-nguyên văn đề xuất của AI để đối chiếu được với kết quả quét lại.
+1. **Header trùng, giá trị mâu thuẫn.** Response trả về `X-Frame-Options: SAMEORIGIN`
+   của Juice Shop lẫn `DENY` của nginx. AI thêm `add_header` mà quên
+   `proxy_hide_header X-Frame-Options`. Đây là lý do finding
+   "X-Frame-Options header is deprecated" của Nikto vẫn còn ở lần quét #17.
 
-`lab/nginx/nginx.conf` trong repo đang ở trạng thái **chưa vá** — đó là điểm xuất phát
-để chạy lại toàn bộ quy trình.
+2. **Đoạn mã tự mâu thuẫn với phần giải thích của chính nó.** Phần chữ khuyên bật
+   `Content-Security-Policy-Report-Only` trước, chuyển sang bản chặn thật sau khi
+   Console sạch. Nhưng trong snippet, dòng để không comment lại là bản chặn thật.
+   Người dùng dán y nguyên sẽ bỏ qua bước thăm dò mà AI vừa dặn. Hệ quả đo được:
+   CSP chặn luôn `<script>` inline khởi tạo banner cookie-consent của Juice Shop.
+
+3. **Cách xử lý đúng bị bỏ trong comment.** Với `Deprecated Feature Policy Header
+   Set`, AI viết `proxy_hide_header Feature-Policy;` dưới dạng dòng ghi chú. Áp
+   bản vá xong, `Feature-Policy: payment 'self'` vẫn lộ và finding vẫn còn.
+
+4. **COEP vẫn thiếu, đúng như dự đoán.** Nhóm làm theo khuyến nghị Report-Only của
+   AI, nên ZAP tiếp tục báo thiếu COEP. Đây là đánh đổi có chủ ý giữa an toàn khi
+   triển khai và việc làm sạch bảng kết quả, không phải bản vá hỏng.
+
+## Hai thứ vòng lặp này phát hiện ra trong chính công cụ
+
+**Bản vá xoá mất tín hiệu mà bộ phân tích cần.** `server_tokens off` bịt banner
+`nginx/1.31.5`, nên ở lần quét #17 `detect_stack()` trả về chuỗi rỗng và log in ra
+"không dò được ngăn xếp". Vá càng kỹ thì lần quét sau càng khó nhận diện ngăn xếp.
+Hiện chấp nhận hạn chế này; hướng xử lý là cho phép ghi đè ngăn xếp theo mục tiêu.
+
+**Trang so sánh từng nói sai.** Nikto dùng chung một id cho mọi header lạ, nên
+`'x-recruiting'` (đã vá xong) và `'cross-origin-embedder-policy-report-only'` (mới
+xuất hiện) gộp chung một fingerprint, và bảng so sánh xếp nhầm vào cột "còn tồn
+tại". Đã sửa bằng cách đưa phần trong dấu nháy đơn của thông báo vào khoá gom
+trùng. Tên header và entry robots.txt đều nằm trong nháy, còn URL thì không, nên
+không làm bung trở lại lỗi cũ: hai finding nặng nhất (140 và 112 URL) không chứa
+dấu nháy nào. Hai test hồi quy giữ chỗ này ở `tests/test_scan.py`.
+
+Vì fingerprint đổi, các finding Nikto có dấu nháy sẽ được coi là mới ở lần quét
+sau và tốn một lượt gọi API. Số lượng nhỏ, chấp nhận được.
+
+## Chạy lại từ đầu
+
+```powershell
+docker run --rm -d -p 3000:3000 --name juiceshop bkimminich/juice-shop
+copy lab\nginx\nginx.conf.chuava.bak lab\nginx\nginx.conf
+docker run --rm -d --name lab-nginx -p 8080:80 `
+  -v "${PWD}\lab\nginx\nginx.conf:/etc/nginx/conf.d/default.conf:ro" nginx:alpine
+
+python scan.py http://localhost:8080          # lần quét trước vá
+# đọc bản vá AI trong báo cáo, dán vào nginx.conf giữa hai mốc
+docker restart lab-nginx
+python scan.py http://localhost:8080          # lần quét sau vá
+python scan.py --compare <id trước> <id sau>
+```
