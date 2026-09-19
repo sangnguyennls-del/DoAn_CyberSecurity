@@ -45,7 +45,7 @@ docker pull nginx:alpine             # cho target vá được ở lab/
 ## Dựng lab
 
 ```powershell
-docker run --rm -d -p 3000:3000 --name juiceshop bkimminich/juice-shop
+docker run --rm -d -p 127.0.0.1:3000:3000 --name juiceshop bkimminich/juice-shop
 ```
 
 Chi tiết ba target và quy trình vá → quét lại: xem [lab/README.md](lab/README.md).
@@ -128,7 +128,7 @@ lời AI là chấm bài bằng đáp án của người làm bài, số liệu 
 pytest -q
 ```
 
-42 test chạy hoàn toàn offline — không cần Docker, không gọi API, không cần mạng.
+59 test chạy hoàn toàn offline — không cần Docker, không gọi API, không cần mạng.
 
 ## Kiến trúc
 

@@ -87,9 +87,9 @@ nhầm thành false positive.
 ### Đợt 1: lần quét #9 và #20 (trước vá), 41 dòng, là phiếu hiện tại
 
 ```powershell
-docker run --rm -d -p 3000:3000 --name juiceshop bkimminich/juice-shop
+docker run --rm -d -p 127.0.0.1:3000:3000 --name juiceshop bkimminich/juice-shop
 docker rm -f lab-nginx
-docker run --rm -d --name lab-nginx -p 8080:80 `
+docker run --rm -d --name lab-nginx -p 127.0.0.1:8080:80 `
   -v "${PWD}\lab\nginx\nginx.conf.chuava.bak:/etc/nginx/conf.d/default.conf:ro" nginx:alpine
 python lab\vulnapp\app.py.chuava.bak        # cửa sổ riêng, để chạy suốt lúc gán
 ```
@@ -115,7 +115,7 @@ Chỉ những finding *mới xuất hiện sau khi vá* được thêm vào. Fin
 
 ```powershell
 docker rm -f lab-nginx
-docker run --rm -d --name lab-nginx -p 8080:80 `
+docker run --rm -d --name lab-nginx -p 127.0.0.1:8080:80 `
   -v "${PWD}\lab\nginx\nginx.conf:/etc/nginx/conf.d/default.conf:ro" nginx:alpine
 python lab\vulnapp\app.py                   # tắt bản chưa vá trước
 curl.exe -sI http://localhost:8080/ | findstr /i "^server"
@@ -123,6 +123,33 @@ curl.exe -sI http://localhost:8080/ | findstr /i "^server"
 python -m eval.evidence 17                  # gom bằng chứng cho các dòng mới, trên bản ĐÃ VÁ
 python -m eval.evidence 21
 ```
+
+### Đợt 3: lần quét #24 (Mutillidae), 72 dòng
+
+Target thứ ba, không vá, nên chỉ cần gán `is_true_positive`. **Để trống `patch_ok`**
+(không có vòng lặp vá trên target này). Phiếu và bằng chứng đã có sẵn:
+
+```powershell
+docker start mutillidae                    # container citizenstig/nowasp, chỉ mở trên 127.0.0.1:8090
+curl.exe -sI http://localhost:8090/ | findstr /i "^server"
+#   phải thấy: Server: Apache/2.4.7 (Ubuntu)
+# bằng chứng: eval\bang_chung\scan_24.md
+```
+
+> **Container đã được dựng lại sạch sau khi chốt nhãn (19/09).** Lab hiện tại KHÔNG còn ở
+> trạng thái lúc quét #24 (khi đó Mutillidae đã offline, MySQL có 94 database rác). Muốn kiểm
+> lại nhãn đợt 3, dựa vào `bang_chung/scan_24.md` và `bang_chung/scan_24_bo_sung.md`, đừng kiểm
+> trên lab hiện tại.
+
+Lưu ý riêng cho đợt này:
+
+- Ba dòng High của ZAP (SQL Injection, SQL Injection time-based, Path Traversal) nằm ở
+  `/phpmyadmin/`, tức phpMyAdmin đi kèm image, không phải trang của Mutillidae. Mở URL trong
+  trình duyệt để xem phpMyAdmin có cho vào mà không cần đăng nhập không, rồi mới quyết.
+- Với các dòng SQLi/XSS, file bằng chứng chỉ gọi lại URL scanner báo, không tự thử payload.
+  Dòng nào ghi "tự kiểm chứng" thì kiểm tay theo mục 4.
+- Mutillidae **cố ý** có lỗ hổng. Điều đó không làm mọi cảnh báo thành `1`: vẫn hỏi đúng hai
+  câu ở mục 1 cho từng dòng.
 
 ---
 

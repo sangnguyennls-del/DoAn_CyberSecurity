@@ -1,6 +1,18 @@
 # Kết quả đánh giá AI so với nhãn thủ công
 
-## Mẫu và cách gán
+Hai đợt. Đợt 1: 46 cặp trên hai target vá được (nginx, vulnapp). Đợt 2: thêm 69 cặp trên
+OWASP Mutillidae II, xem mục "Mở rộng" bên dưới. Số gộp cả ba target:
+
+```
+python -m eval.metrics all
+```
+
+| | Precision | Recall | Accuracy |
+|---|---|---|---|
+| Đợt 1 (46 cặp) | 100% (5/5) | 17% (5/30) | 46% (21/46) |
+| **Gộp ba target (115 cặp)** | **86,7% (13/15)** | **25,5% (13/51)** | 65,2% (75/115) |
+
+## Mẫu và cách gán (đợt 1)
 
 46 cặp (finding, target), lấy từ bốn lần quét:
 
@@ -24,7 +36,7 @@ Phân bố nhãn: 16 lỗ hổng thật, 30 không phải (4 `FP-sai`, 26 `FP-in
 
 ---
 
-## Chỉ số chính
+## Chỉ số chính (đợt 1)
 
 Định nghĩa đặt từ trước khi gán (`eval/metrics.py`): Positive = "đây là false positive"; AI
 dự đoán Positive khi `false_positive_risk = "Cao"`.
@@ -141,6 +153,98 @@ Critical, "Dangerous JS Functions" từ Low lên High.
 
 ---
 
+## Mở rộng: Mutillidae và kết quả gộp ba target
+
+### Mẫu
+
+Lần quét #24 (`http://localhost:8090`, OWASP Mutillidae II, image `citizenstig/nowasp`, Apache
+2.4.7 + PHP 5.5.9, profile `full`): 341 phát hiện thô -> 72 lỗ hổng (28 Nikto, 44 ZAP). Cả 72
+có phân tích AI. 69 dòng gán được; 3 dòng để trống vì không đủ dữ kiện (Path Traversal,
+Dangerous JS Functions, User Controllable Charset) và bị loại khỏi mẫu.
+
+- Hai người gán chia nhau các dòng (`sangnl` 44, `tinnt` 28 lúc nộp), không gán trùng.
+- Không có vòng lặp vá nên `patch_ok` để trống cả 72 dòng.
+- Phân bố: 48 lỗ hổng thật, 21 không (7 `FP-sai`, 14 `FP-info`).
+- Bằng chứng: `bang_chung/scan_24.md` (tự động) và `bang_chung/scan_24_bo_sung.md` (9 dòng khó,
+  phần lớn do người gán tự kiểm trên trình duyệt).
+
+### Chỉ số
+
+| Target | n | Precision | Recall |
+|---|---|---|---|
+| vulnapp `:5000` | 21 | 2/2 | 2/10 |
+| nginx `:8080` | 25 | 3/3 | 3/20 |
+| Mutillidae `:8090` | 69 | 8/10 | 8/21 |
+| **Gộp** | **115** | **13/15 (86,7%)** | **13/51 (25,5%)** |
+
+Khả năng FP do AI đưa ra, theo loại nhãn (gộp):
+
+| Nhãn của người | n | AI: Cao | Trung bình | Thấp |
+|---|---|---|---|---|
+| `FP-sai` | 11 | 7 | 3 | 1 |
+| `FP-info` | 40 | 6 | 8 | 26 |
+| Lỗ hổng thật | 64 | 2 | 13 | 49 |
+
+Mức độ AI đánh giá, theo loại nhãn (gộp):
+
+| Nhãn của người | Critical | High | Medium | Low | Info |
+|---|---|---|---|---|---|
+| Lỗ hổng thật (64) | 3 | 16 | 19 | 23 | 3 |
+| `FP-info` (40) | 0 | 0 | 3 | 17 | 20 |
+| `FP-sai` (11) | 0 | 2 | 4 | 3 | 2 |
+
+Mẫu hình của đợt 1 giữ nguyên trên target thứ ba: AI bắt `FP-sai` tốt (7/11) hơn hẳn `FP-info`
+(6/40), và báo hiệu "không đáng lo" qua mức độ (37/40 dòng `FP-info` ở Low/Info). Ngưỡng rộng
+(tính cả "Trung bình"): precision 61,5% (24/39), recall 47,1% (24/51).
+
+### Hai lỗ hổng thật bị AI xếp FP "Cao"
+
+Precision 100% của đợt 1 không giữ được. Hai ca, trích nguyên văn phân tích trong DB:
+
+**SQL Injection - MySQL (Time Based), phpMyAdmin.** Người gán `1`: phpMyAdmin vào thẳng bằng
+root không mật khẩu, SQL do ZAP gửi đã chạy thật (94 database). AI xếp rủi ro FP "Cao" nhưng
+mức độ **High**, với lý do: "phpMyAdmin theo thiết kế nhận tham số sql_query và thực thi đúng câu
+SQL đó — ZAP gửi payload vào đây thì tất nhiên SQL được chạy, nhưng đó là chức năng chứ không
+phải lỗ hổng injection … Tuy vậy mình vẫn giữ mức High, không phải vì tin cảnh báo injection, mà
+vì bằng chứng này phơi bày một sự thật nghiêm trọng hơn: phpMyAdmin đang mở công khai". Người và
+AI thống nhất về bản chất; chỉ khác ở chỗ trường FP của AI trả lời "ZAP gọi tên có đúng không",
+còn nhãn trả lời "có điểm yếu thật không". Cùng hiện tượng với ca XSS DOM ở đợt 1.
+
+**Information Disclosure - Suspicious Comments.** Người gán `1` ("lộ comment nội bộ của lập trình
+viên"). AI xếp FP "Cao", mức Low: kiểm tra theo từ khoá, "nhiều khả năng là một comment mang tính
+giảng dạy trong Mutillidae". Bất đồng thật; comment nằm trong file tài liệu
+`documentation/Mutillidae-Test-Scripts.txt`.
+
+### Target bị chính active scan làm hỏng
+
+- phpMyAdmin 3.5.2.2 trong image đăng nhập MySQL bằng root không mật khẩu. Active scan của ZAP đi
+  qua đó và chạy SQL thật: MySQL có 94 database, phần lớn mang tên payload của ZAP.
+- Lúc quét #24 và lúc gán nhãn, mọi trang của Mutillidae chuyển sang `database-offline.php`
+  ("Access denied for user 'admin'"); tài khoản MySQL mà ứng dụng dùng không còn. Chưa xác định
+  được nguyên nhân mất tài khoản.
+- Lần quét #23 (trước đó, dừng giữa chừng vì chi phí) có 116 dòng "RFI from RSnake's RFI list"; #24
+  không có dòng nào. Giả thuyết chưa kiểm chứng: `index.php` chỉ còn chuyển hướng nên các test RFI
+  không khớp.
+- Nhãn gán theo trạng thái lúc quét #24, nên phép đo vẫn nhất quán; nhưng đây là một target đã
+  hỏng, không phải Mutillidae nguyên bản.
+- Sau khi chốt nhãn, container được dựng lại từ image gốc (4 database, trang chủ trả 200). Trong
+  container mới, `MySQLHandler.php` được ghi lại 6 giây sau khi khởi động và tài khoản `admin` là
+  của chính image: file cấu hình không bị ai sửa tay; tài khoản `admin` mất sau khi container cũ
+  khởi động, nguyên nhân chưa xác định. Chi tiết: `bang_chung/scan_24_bo_sung.md`.
+
+### Chi phí
+
+| Lần | Phân tích | Token vào / ra | Ước tính |
+|---|---|---|---|
+| #23 (dừng sau 9/32 lô) | 54/190 | 48.252 / 105.916 | ≈ 2,9 USD |
+| #24 (46 lấy từ cache) | 26 + 6 chạy lại | 27.106 / 51.663 | ≈ 1,4 USD |
+
+Chạy hết #23 với khoá gom trùng cũ sẽ tốn khoảng 10 USD, phần lớn cho 116 dòng RFI gần như giống
+hệt nhau. Khoá Nikto giờ gom họ này về một dòng (có test hồi quy); chưa thử lại trên lần quét thật
+vì RFI không xuất hiện ở #24.
+
+---
+
 ## Chất lượng bản vá
 
 `patch_ok` gán cho 16 lỗ hổng thật; lý do từng dòng ở cột `note_patchok`. Quy tắc: `1` nếu áp
@@ -209,14 +313,36 @@ Mọi thay đổi sau lần gán đầu, theo thứ tự. Ảnh chụp phiếu �
 4. Người gán xem kết quả thử riêng bản vá XSS DOM (lần quét #22) và đổi `patch_ok` từ `0`
    sang `1`: cảnh báo biến mất, chức năng không hỏng.
 
+Đợt 2 (Mutillidae, 19/09):
+
+5. Phiếu nộp có nhãn nằm nhầm ở cột `patch_ok` (ghi chú "FP-sai"/"FP-info" đi kèm số 0). Người
+   gán xác nhận điền nhầm cột; Claude chuyển 72 dòng sang `is_true_positive`, để trống
+   `patch_ok`. Bản nộp nguyên trạng: `bang_chung/phieu_3_mutillidae_nguyen_ban.csv`.
+6. 9 dòng ghi "không thể kiểm chứng" được thu thêm bằng chứng (`bang_chung/scan_24_bo_sung.md`),
+   phần lớn do người gán tự làm trên trình duyệt theo hướng dẫn, chỉ dùng chuỗi đánh dấu vô hại.
+7. Đính chính bằng chứng dòng XSS Reflected: lần thu đầu dùng token phiên của ZAP trong phiên khác,
+   phpMyAdmin bỏ tham số, nên kết luận "không phản chiếu" là sai. Nhãn `0 FP-sai` đã được gán khi
+   chỉ có kết quả sai đó; người gán kiểm lại với phiên hợp lệ (tham số có phản chiếu, dấu `"` vẫn là
+   `%22`) và giữ nhãn; ghi chú viết lại theo dữ kiện đúng.
+8. Gán 6/9 dòng sau khi có bằng chứng: người gán đưa nhãn 0/1; loại `FP-sai`/`FP-info` quy theo
+   quy tắc đã thống nhất, người gán duyệt bảng trước khi Claude ghi vào phiếu. 3 dòng để trống.
+   Ảnh chụp phiếu lúc này: `bang_chung/phieu_4_mutillidae_chot.csv`.
+9. Kiểm tính nhất quán có hệ thống (mọi tên cảnh báo có ở từ hai target): "Modern Web Application"
+   `:8090` mang `1` trong khi `:8080` là `0 FP-info` cho cùng một cảnh báo thông tin. Người gán đổi
+   `:8090` sang `0 FP-info`. Bước này chạy sau khi Claude đã chạy thử lệnh tính gộp (để kiểm nó
+   tái lập đúng số đợt 1) nhưng trước khi người gán thấy số liệu nào.
+
 ## Hạn chế
 
-- Một người gán, chưa đo đồng thuận giữa các người gán.
+- Chưa đo đồng thuận giữa các người gán: đợt 1 một người gán; đợt 2 hai người chia nhau các dòng,
+  không gán trùng.
+- Mutillidae bị hỏng trong lúc quét (mục "Target bị chính active scan làm hỏng"); 3 dòng của nó để
+  trống; phân bố nhãn nghiêng về lỗ hổng thật (48/69) vì đây là ứng dụng cố ý có lỗ hổng.
 - `patch_ok` của 6 dòng (5 loại B và XSS DOM) dựa trên thử nghiệm tự động do Claude chạy; kết
   quả là dữ kiện đo được (header có mặt, chức năng còn chạy), nhưng người thực hiện không phải
   người gán.
-- Mẫu nhỏ: 46 cặp, trong đó chỉ 4 `FP-sai` và 5 dự đoán Positive.
+- Mẫu nhỏ: 115 cặp, trong đó 11 `FP-sai` và 15 dự đoán Positive.
 - Ranh giới `FP-info` với `1` ở nhóm "thiếu header" phụ thuộc quy tắc người gán tự chốt.
-- Hai target đều do nhóm dựng hoặc chọn; một target (vulnapp) cố ý có lỗ hổng.
-- Cả bốn lần quét dùng profile baseline (nginx) hoặc full (vulnapp); chưa có lần quét full nào
+- Cả ba target đều do nhóm dựng hoặc chọn; vulnapp và Mutillidae cố ý có lỗ hổng.
+- Các lần quét dùng profile baseline (nginx) hoặc full (vulnapp, Mutillidae); chưa có lần quét full nào
   trên Juice Shop.

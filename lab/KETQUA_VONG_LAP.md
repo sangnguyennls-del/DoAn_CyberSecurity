@@ -228,9 +228,9 @@ báo đổi mà fingerprint giữ nguyên, báo cáo hiện lời giải thích 
 
 ```powershell
 # nginx
-docker run --rm -d -p 3000:3000 --name juiceshop bkimminich/juice-shop
+docker run --rm -d -p 127.0.0.1:3000:3000 --name juiceshop bkimminich/juice-shop
 copy lab\nginx\nginx.conf.chuava.bak lab\nginx\nginx.conf
-docker run --rm -d --name lab-nginx -p 8080:80 `
+docker run --rm -d --name lab-nginx -p 127.0.0.1:8080:80 `
   -v "${PWD}\lab\nginx\nginx.conf:/etc/nginx/conf.d/default.conf:ro" nginx:alpine
 python scan.py http://localhost:8080                   # trước vá
 # dán bản vá AI vào nginx.conf giữa hai mốc, rồi: docker restart lab-nginx

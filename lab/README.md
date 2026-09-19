@@ -1,12 +1,13 @@
 # Lab — môi trường quét và vòng lặp vá → quét lại
 
-Ba target, mỗi cái một vai trò. Chỉ chạy trên máy cá nhân.
+Bốn target, mỗi cái một vai trò. Chỉ chạy trên máy cá nhân.
 
 | Target | Cổng | Vai trò |
 |---|---|---|
 | OWASP Juice Shop | 3000 | Bề mặt quét phong phú, nhiều lỗ hổng hiện đại. **Không vá được** (code người khác). |
 | nginx reverse proxy → Juice Shop | 8080 | Vá được ở **tầng cấu hình**: header, banner, cookie |
 | `vulnapp/app.py` (Flask) | 5000 | Vá được ở **tầng code**: SQLi, XSS, lộ lỗi |
+| OWASP Mutillidae II | 8090 | Target thứ ba cho phần đánh giá AI, không vá |
 
 Cần cả hai loại target vá được: nếu chỉ có nginx thì chỉ chứng minh được AI vá cấu
 hình, không chứng minh được AI vá code.
@@ -14,7 +15,7 @@ hình, không chứng minh được AI vá code.
 ## 1. Juice Shop — target chính để quét
 
 ```powershell
-docker run --rm -d -p 3000:3000 --name juiceshop bkimminich/juice-shop
+docker run --rm -d -p 127.0.0.1:3000:3000 --name juiceshop bkimminich/juice-shop
 python scan.py http://localhost:3000
 ```
 
@@ -25,7 +26,7 @@ Juice Shop không sửa được, nhưng phần lớn phát hiện của ZAP/Nik
 
 ```powershell
 # Juice Shop phải đang chạy trước
-docker run --rm -d --name lab-nginx -p 8080:80 `
+docker run --rm -d --name lab-nginx -p 127.0.0.1:8080:80 `
   -v "${PWD}/lab/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro" `
   nginx:alpine
 
@@ -78,14 +79,30 @@ curl -I http://127.0.0.1:5000/                              # không có CSP/X-F
 Vá theo đề xuất của AI, chạy lại đúng ba lệnh trên để xác nhận đã hết, rồi quét lại
 và so sánh.
 
+## 4. Mutillidae — target thứ ba
+
+```powershell
+docker run -d --name mutillidae -p 127.0.0.1:8090:80 citizenstig/nowasp
+curl.exe -s http://localhost:8090/set-up-database.php > NUL      # khởi tạo DB lần đầu
+curl.exe -s -o NUL -w "%{http_code}\n" "http://localhost:8090/index.php?page=home.php"
+#   phải thấy 200; nếu thấy 302 sang database-offline.php thì DB chưa sẵn sàng
+python scan.py http://localhost:8090 --profile full
+```
+
+> **Active scan làm hỏng target này.** Image đi kèm phpMyAdmin tự đăng nhập MySQL bằng root
+> không mật khẩu. Ở lần quét #23/#24, ZAP chạy SQL thật qua đó (94 database mang tên payload)
+> và Mutillidae chuyển sang `database-offline.php`. Sau mỗi lần quét `full`, dựng lại container
+> từ đầu (`docker rm -f mutillidae` rồi chạy lại hai lệnh đầu) trước khi dùng tiếp.
+
 ## Dọn dẹp
 
 ```powershell
-docker stop juiceshop lab-nginx
+docker stop juiceshop lab-nginx mutillidae
 ```
 
 ## Lưu ý an toàn
 
-`vulnapp` bind vào `127.0.0.1`, máy khác trong mạng không truy cập được — **đừng đổi
-thành `0.0.0.0`**. Juice Shop và nginx thì publish ra mọi interface, nên đừng chạy
-chúng khi đang ở mạng công cộng (wifi trường, quán cà phê).
+Mọi target chỉ mở trên `127.0.0.1`: `vulnapp` tự bind `127.0.0.1`, các container publish
+dạng `-p 127.0.0.1:<cổng>:<cổng>`. Máy khác trong mạng không truy cập được — **đừng bỏ phần
+`127.0.0.1:`**, vì đây là các ứng dụng cố ý có lỗ hổng. Scanner trong Docker vẫn tới được
+chúng qua `host.docker.internal`.
