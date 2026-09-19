@@ -264,8 +264,13 @@ def analyze(
         if conn is not None and got:
             db_mod.put_cached(conn, model, target, got)   # ghi ngay, không đợi hết vòng
         fresh.update({a["fingerprint"]: a for a in got})
-        say(f"  [ok] Lô {i}/{len(batches)}: {len(got)}/{len(batch)} phân tích "
-            f"({ti:,} vào / {to:,} ra)")
+        # Đo ở #24: một lô trả 0/6 mà log vẫn ghi [ok]. Tách "trả thiếu" với "trả sai
+        # fingerprint" để biết nên chạy lại hay nên sửa prompt.
+        stray = len(out.analyses) - len(got)
+        say(f"  [{'ok' if len(got) == len(batch) else '!'}] Lô {i}/{len(batches)}: "
+            f"{len(got)}/{len(batch)} phân tích"
+            + (f", {stray} mang fingerprint lạ" if stray else "")
+            + f" ({ti:,} vào / {to:,} ra)")
 
     if len(fresh) < len(todo):
         warnings.append(f"Nhận {len(fresh)}/{len(todo)} phân tích cho lỗ hổng mới.")

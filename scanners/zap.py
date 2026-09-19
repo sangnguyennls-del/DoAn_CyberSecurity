@@ -130,12 +130,23 @@ def docker_args(container_url: str, host_outdir: str, profile: str = "baseline")
         _write_auth_plan(container_url, host_outdir)
         return base + ["zap.sh", "-cmd", "-autorun", f"/zap/wrk/{PLAN_FILE}"]
 
-    return base + [
+    args = base + [
         SCRIPTS.get(profile, SCRIPTS["baseline"]),
         "-t", container_url,
         "-J", OUTFILE,
         "-I",   # không trả exit code thất bại chỉ vì có WARN
     ]
+    if profile == "full":
+        args += FULL_LIMITS
+    return args
+
+
+# Active scan của zap-full-scan mặc định không giới hạn thời gian, còn runner cắt ở 30 phút
+# (runner.TIMEOUT). Bị runner cắt thì mất trắng; để ZAP tự dừng thì vẫn có báo cáo phần đã
+# quét. Tổng: spider <= 5 + active <= 15 phút, còn dư cho khởi động và passive scan.
+# ponytail: con số chọn cho app lab cỡ Mutillidae; app lớn hơn thì nâng cả hai cùng TIMEOUT.
+FULL_LIMITS = ["-m", "5", "-z",
+               "-config scanner.maxScanDurationInMins=15 -config scanner.maxRuleDurationInMins=3"]
 
 
 def parse(data) -> list[Finding]:

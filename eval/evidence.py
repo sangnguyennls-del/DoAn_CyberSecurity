@@ -62,7 +62,9 @@ def headers_for(name: str) -> list[str]:
 def curl(*args: str) -> str:
     r = subprocess.run(["curl.exe", "-s", "--max-time", "15", *args],
                        capture_output=True, timeout=30)
-    return r.stdout.decode("utf-8", errors="replace")
+    # File nhị phân (vd. .git/index lộ trên Mutillidae) mang \x00 vào markdown -> git
+    # và grep coi cả file bằng chứng là nhị phân. Giữ xuống dòng, thay phần còn lại.
+    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "·", r.stdout.decode("utf-8", errors="replace"))
 
 
 def head(url: str, *extra: str) -> tuple[str, dict[str, str]]:
@@ -229,10 +231,16 @@ def check_generic(r: dict) -> list[str]:
 
 def check(r: dict) -> list[str]:
     n = r["name"]
-    if n == "SQL Injection":
+    url = urlsplit(r["url"])
+    # Hai kiểm tra này viết cho vulnapp (/search?q=, tham số name). Trên target khác
+    # chúng ghi dữ kiện của một trang không liên quan -> chỉ gọi lại URL scanner báo.
+    if n == "SQL Injection" and url.path == "/search":
         return check_sqli(r)
-    if n.startswith("Cross Site Scripting (Reflected)"):
+    if n.startswith("Cross Site Scripting (Reflected)") and "name" in parse_qs(url.query):
         return check_xss_reflected(r)
+    if n.startswith(("SQL Injection", "Cross Site Scripting (Reflected)")):
+        return check_generic(r) + ["(Kiểm tra trên chỉ gọi lại URL scanner báo; "
+                                   "tự kiểm chứng theo HUONG_DAN_GAN_NHAN.md.)"]
     if n.startswith("Cross Site Scripting (DOM"):
         return check_xss_dom(r)
     if "access-control-allow-origin" in n.lower() or n.startswith("Cross-Domain Misconfiguration"):

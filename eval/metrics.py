@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import csv
 import sys
+from collections import Counter
 from pathlib import Path
 
 from core import db
@@ -57,8 +58,17 @@ def load_labels() -> dict[tuple[str, str], dict]:
                 "is_true_positive": int(tp),
                 "patch_ok": (row.get("patch_ok") or "").strip(),
                 "name": row.get("name", ""),
+                "note": row.get("note", ""),
             }
     return out
+
+
+def label_kind(label: dict) -> str:
+    """"thật" / "FP-sai" / "FP-info". Loại của nhãn 0 lấy từ cột note, như quy tắc gán."""
+    if label["is_true_positive"] == 1:
+        return "thật"
+    note = label.get("note", "")
+    return "FP-sai" if "FP-sai" in note else "FP-info" if "FP-info" in note else "0 chưa phân loại"
 
 
 def _rate(num: int, den: int) -> str:
@@ -149,7 +159,61 @@ Ma trận nhầm lẫn (Positive = "đây là false positive"):
     return 0
 
 
+def pooled() -> int:
+    """Gộp MỌI cặp (fingerprint, target) đã gán nhãn. Mỗi cặp tính đúng một lần, kể cả
+    khi nó xuất hiện ở nhiều lần quét - số theo từng lần quét thì trùng mẫu nhau."""
+    conn = db.connect()
+    labels = load_labels()
+    targets: dict[str, list[str]] = {}
+    for fp, target in labels:
+        targets.setdefault(target, []).append(fp)
+
+    rows: list[tuple[str, dict, dict]] = []
+    missing = 0
+    for target, fps in sorted(targets.items()):
+        ai = db.get_cached(conn, fps, target)
+        rows += [(target, labels[(fp, target)], ai[fp]) for fp in fps if fp in ai]
+        missing += sum(1 for fp in fps if fp not in ai)
+
+    def line(title: str, subset: list[tuple[str, dict, dict]]) -> str:
+        tp, fp, fn, tn = confusion([(l, a) for _, l, a in subset])
+        return (f"  {title:<24} n={len(subset):>3}  TP={tp:>2} FP={fp:>2} FN={fn:>2} TN={tn:>3}  "
+                f"P={_rate(tp, tp + fp)}  R={_rate(tp, tp + fn)}")
+
+    print(f"\n=== ĐÁNH GIÁ AI - GỘP MỌI TARGET ===\n\n{len(rows)} cặp có nhãn và phân tích AI"
+          + (f" ({missing} cặp có nhãn nhưng thiếu phân tích, không tính)" if missing else "") + "\n")
+    print(line("Tất cả", rows))
+    for target in sorted(targets):
+        print(line(target.replace("http://", ""), [r for r in rows if r[0] == target]))
+
+    kinds = ["thật", "FP-sai", "FP-info", "0 chưa phân loại"]
+    print("\nKhả năng FP do AI đưa ra, theo loại nhãn:")
+    for k in kinds:
+        sub = [a for _, l, a in rows if label_kind(l) == k]
+        if sub:
+            c = Counter((a.get("false_positive_risk") or "").strip() for a in sub)
+            print(f"  {k:<18} n={len(sub):>3}  Cao={c['Cao']:>2}  Trung bình={c['Trung bình']:>2}  Thấp={c['Thấp']:>2}")
+
+    print("\nMức độ AI đánh giá, theo loại nhãn:")
+    for k in kinds:
+        sub = [a for _, l, a in rows if label_kind(l) == k]
+        if sub:
+            c = Counter((a.get("severity_ai") or "").strip() for a in sub)
+            print(f"  {k:<18} n={len(sub):>3}  " + "  ".join(
+                f"{s}={c[s]}" for s in ("Critical", "High", "Medium", "Low", "Info")))
+
+    # Tham khảo, không thay định nghĩa chính: tính cả "Trung bình" là AI nói FP
+    wide = [(l, {**a, "false_positive_risk": "Cao"}
+             if (a.get("false_positive_risk") or "").strip() == "Trung bình" else a) for _, l, a in rows]
+    tp, fp, fn, _ = confusion(wide)
+    print(f"\nNgưỡng rộng (Cao + Trung bình): P={_rate(tp, tp + fp)}  R={_rate(tp, tp + fn)}")
+
+    patch = [l for _, l, _ in rows if l["patch_ok"] in ("0", "1")]
+    print(f"Bản vá dùng được: {_rate(sum(l['patch_ok'] == '1' for l in patch), len(patch))}\n")
+    return 0
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        sys.exit("Cách dùng: python -m eval.metrics <scan_id>")
-    raise SystemExit(main(int(sys.argv[1])))
+        sys.exit("Cách dùng: python -m eval.metrics <scan_id>   hoặc   python -m eval.metrics all")
+    raise SystemExit(pooled() if sys.argv[1] == "all" else main(int(sys.argv[1])))

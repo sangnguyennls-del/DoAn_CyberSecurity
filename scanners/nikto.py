@@ -30,6 +30,12 @@ _QUOTED = re.compile(r"'([^']{1,60})'")
 # nằm trong nháy. Đo ở lần quét #18 -> #19: 5 header thiếu gộp làm một, vá 4 cái
 # mà bảng so sánh vẫn báo "còn tồn tại", và finding về HSTS hiện bản vá AI viết cho CSP.
 _MISSING_HEADER = re.compile(r"header missing: ([\w-]{1,60})", re.I)
+# Chiều ngược lại: có họ mà Nikto cấp MỖI mục một id riêng dù thông báo giống hệt.
+# Đo ở lần quét #23 (Mutillidae): 116/148 fingerprint Nikto là "RFI from RSnake's RFI
+# list", tức 116 lần gọi API cho một vấn đề với một bản vá. Họ này gom theo thông báo.
+# ponytail: danh sách tay, gặp họ mới thì thêm mẫu. Không gom theo thông báo nói chung -
+# "This might be interesting." trên /ftp/ và /public/ mang hai nhãn khác nhau.
+_ONE_ID_PER_ENTRY = re.compile(r"Remote File Inclusion \(RFI\) from RSnake's RFI list", re.I)
 
 
 def _key(test_id: str, msg: str) -> str:
@@ -45,6 +51,9 @@ def _key(test_id: str, msg: str) -> str:
     đều được Nikto đặt trong nháy; còn URL thì KHÔNG, nên chỗ này không làm bung
     trở lại lỗi cũ (một phát hiện khớp 140 URL thành 140 dòng).
     """
+    family = _ONE_ID_PER_ENTRY.search(msg)
+    if family:
+        return family.group(0).lower()
     return "|".join([test_id, *_QUOTED.findall(msg), *_MISSING_HEADER.findall(msg)])
 
 

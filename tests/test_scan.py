@@ -130,6 +130,31 @@ def test_same_uncommon_header_still_collapses():
     assert len(merged) == 1 and merged[0].count == 12
 
 
+def test_rfi_list_with_one_id_per_entry_collapses_to_one_finding():
+    """Hồi quy cho lần quét #23 (Mutillidae): Nikto cấp MỖI mục trong danh sách RFI
+    một id riêng, thông báo thì giống hệt. 116/148 fingerprint Nikto là họ này, tức
+    116 lần gọi API cho cùng một vấn đề với cùng một bản vá."""
+    data = {"vulnerabilities": [
+        {"id": str(600000 + i), "method": "GET",
+         "url": f"/?p{i}=http://cirt.net/public/rfiinc.txt",
+         "msg": "Remote File Inclusion (RFI) from RSnake's RFI list."}
+        for i in range(116)
+    ]}
+    merged = dedupe(nikto.parse(data))
+    assert len(merged) == 1 and merged[0].count == 116
+
+
+def test_same_message_different_ids_stay_separate_outside_rfi_list():
+    """Mặt còn lại: KHÔNG gom theo thông báo nói chung. Ở #9, "This might be
+    interesting." trên /ftp/ là lỗ hổng thật, trên /public/ là FP-sai - hai nhãn khác
+    nhau, gộp lại thì ground truth không còn đúng."""
+    data = {"vulnerabilities": [
+        {"id": "999990", "method": "GET", "url": "/ftp/", "msg": "This might be interesting."},
+        {"id": "999991", "method": "GET", "url": "/public/", "msg": "This might be interesting."},
+    ]}
+    assert len(dedupe(nikto.parse(data))) == 2
+
+
 # ----------------------------------------------------------------- dedupe
 
 def mk(key: str, url: str = "/", sev: str = "Info", count: int = 1) -> Finding:
@@ -333,6 +358,14 @@ def test_false_positive_prediction_only_on_high_risk():
 
 # ------------------------------------------------- quét có đăng nhập (auth)
 
+def test_full_scan_is_time_boxed_but_baseline_is_not(tmp_path):
+    """Không giới hạn thì active scan trên app nhiều trang vượt runner.TIMEOUT và mất trắng."""
+    full = zap.docker_args("http://host.docker.internal:8090", str(tmp_path), "full")
+    assert "zap-full-scan.py" in full and "scanner.maxScanDurationInMins" in " ".join(full)
+    base = zap.docker_args("http://host.docker.internal:8090", str(tmp_path), "baseline")
+    assert "scanner.maxScanDurationInMins" not in " ".join(base)
+
+
 def test_auth_profile_requires_credentials(monkeypatch, tmp_path):
     """Thiếu tài khoản phải báo lỗi rõ ràng, không sinh plan rỗng."""
     monkeypatch.delenv("ZAP_AUTH_USER", raising=False)
@@ -533,6 +566,33 @@ def test_evidence_picks_the_right_header_to_check():
     assert headers_for("Missing Anti-clickjacking Header") == ["X-Frame-Options", "Content-Security-Policy"]
     assert headers_for("CSP: Wildcard Directive") == ["Content-Security-Policy"]
     assert headers_for("SQL Injection") == []
+
+
+def test_evidence_vulnapp_checks_do_not_run_on_other_targets(monkeypatch):
+    """check_sqli/check_xss_reflected viết cho vulnapp (/search?q=, tham số name).
+    Chạy trên Mutillidae thì chúng ghi dữ kiện của một trang không liên quan, ví dụ
+    "payload có xuất hiện: Không" -> người gán dễ đánh nhầm là false positive."""
+    from eval import evidence
+    called = []
+    monkeypatch.setattr(evidence, "curl", lambda *a: called.append(a) or "")
+    for name in ("SQL Injection", "Cross Site Scripting (Reflected)"):
+        r = {"name": name, "source": "zap", "target": "http://localhost:8090", "evidence": "",
+             "url": "http://localhost:8090/index.php?page=user-info.php&username=x"}
+        out = evidence.check(r)
+        assert not any("/search?q=" in str(a) for a in called), name
+        assert "tự kiểm chứng" in out[-1], name
+    vulnapp = {"name": "Cross Site Scripting (Reflected)", "source": "zap", "evidence": "",
+               "target": "http://localhost:5000", "url": "http://localhost:5000/greet?name=x"}
+    assert any("payload scanner gửi" in line for line in evidence.check(vulnapp))
+
+
+def test_label_kind_reads_fp_type_from_note():
+    """Bảng "recall thấp đến từ đâu" tách FP-sai / FP-info theo cột note."""
+    from eval.metrics import label_kind
+    assert label_kind({"is_true_positive": 1, "note": "FP-sai nhưng giữ 1"}) == "thật"
+    assert label_kind({"is_true_positive": 0, "note": "FP-sai: ZAP khẳng định sai"}) == "FP-sai"
+    assert label_kind({"is_true_positive": 0, "note": "FP-info"}) == "FP-info"
+    assert label_kind({"is_true_positive": 0, "note": ""}) == "0 chưa phân loại"
 
 
 def test_report_write_failure_does_not_fail_the_scan(tmp_path):
