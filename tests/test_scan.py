@@ -5,6 +5,7 @@ Mục đích: mỗi khi ai đó sửa parser hay schema, chạy `pytest -q` là 
 
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 
@@ -469,9 +470,11 @@ def test_export_preserves_existing_labels(monkeypatch, tmp_path):
 
     export.main(scan_id)
     text = out.read_text(encoding="utf-8-sig")
+    assert "fp_risk_ai" not in text and "severity_ai" not in text, \
+        "phiếu gán nhãn không được lộ kết luận của AI"
     t = "http://localhost:3000"
-    text = text.replace(f"{findings[0].fingerprint},{t},zap,High,Critical,Thấp,A,,,,",
-                        f"{findings[0].fingerprint},{t},zap,High,Critical,Thấp,A,1,1,ghi chú,an")
+    text = text.replace(f"{findings[0].fingerprint},{t},zap,High,A,{t}/,,,,,",
+                        f"{findings[0].fingerprint},{t},zap,High,A,{t}/,,1,1,ghi chú,an")
     out.write_text(text, encoding="utf-8-sig")
 
     export.main(scan_id)  # chạy lại
@@ -481,6 +484,55 @@ def test_export_preserves_existing_labels(monkeypatch, tmp_path):
     kept = rows[findings[0].fingerprint]
     assert kept["is_true_positive"] == "1" and kept["patch_ok"] == "1"
     assert kept["note"] == "ghi chú" and kept["labeled_by"] == "an"
+
+
+def test_export_keeps_columns_the_labeller_added(monkeypatch, tmp_path):
+    """Người gán tự thêm cột `note_patchok`. Export chỉ ghi COLUMNS thì cột đó bị xoá
+    sạch ở lần chạy sau mà không báo gì."""
+    from eval import export
+    _, scan_id, findings = _seeded_db(monkeypatch, tmp_path)
+    out = tmp_path / "gt.csv"
+    monkeypatch.setattr(export, "OUT", out)
+    export.main(scan_id)
+    rows = list(csv.DictReader(out.open(encoding="utf-8-sig")))
+    rows[0]["note_patchok"] = "lý do bản vá"
+    with out.open("w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        w.writeheader()
+        w.writerows({**r, "note_patchok": r.get("note_patchok", "")} for r in rows)
+
+    export.main(scan_id)
+    kept = {r["fingerprint"]: r for r in csv.DictReader(out.open(encoding="utf-8-sig"))}
+    assert kept[rows[0]["fingerprint"]]["note_patchok"] == "lý do bản vá"
+
+
+def test_export_drops_dead_rows_but_keeps_labelled_ones(monkeypatch, tmp_path):
+    """Dòng target trống (phiếu bản cũ) không bao giờ khớp được khi đo. Chưa gán thì
+    bỏ, để người gán khỏi điền vào dòng chết; đã gán thì giữ, vì đó là công sức."""
+    from eval import export
+    _, scan_id, _ = _seeded_db(monkeypatch, tmp_path)
+    out = tmp_path / "gt.csv"
+    out.write_text(
+        "fingerprint,target,source,severity_scanner,name,is_true_positive,patch_ok,note,labeled_by\n"
+        "cu_chua_gan,,zap,Low,X,,,,\n"
+        "cu_da_gan,,zap,Low,Y,1,,,an\n",
+        encoding="utf-8-sig",
+    )
+    monkeypatch.setattr(export, "OUT", out)
+    export.main(scan_id)
+    text = out.read_text(encoding="utf-8-sig")
+    assert "cu_chua_gan" not in text
+    assert "cu_da_gan" in text
+
+
+def test_evidence_picks_the_right_header_to_check():
+    """Kiểm nhầm header thì bằng chứng ghi "KHÔNG CÓ" cho một thứ đang có -> gán nhầm."""
+    from eval.evidence import headers_for
+    assert headers_for("Suggested security header missing: referrer-policy.") == ["referrer-policy"]
+    assert headers_for("Uncommon header(s) 'x-recruiting' found, with contents: /#/jobs.") == ["x-recruiting"]
+    assert headers_for("Missing Anti-clickjacking Header") == ["X-Frame-Options", "Content-Security-Policy"]
+    assert headers_for("CSP: Wildcard Directive") == ["Content-Security-Policy"]
+    assert headers_for("SQL Injection") == []
 
 
 def test_report_write_failure_does_not_fail_the_scan(tmp_path):

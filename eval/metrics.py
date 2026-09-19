@@ -48,6 +48,11 @@ def load_labels() -> dict[tuple[str, str], dict]:
             tp = (row.get("is_true_positive") or "").strip()
             if tp not in ("0", "1"):
                 continue  # chưa gán nhãn
+            if not row.get("target"):
+                # nhãn không khớp được với lần quét nào -> nói ra, đừng lặng lẽ bỏ
+                print(f"[BỎ QUA] {row['fingerprint']}: thiếu cột target, nhãn này không được tính.",
+                      file=sys.stderr)
+                continue
             out[(row["fingerprint"], row.get("target", ""))] = {
                 "is_true_positive": int(tp),
                 "patch_ok": (row.get("patch_ok") or "").strip(),
